@@ -1,4 +1,4 @@
-// Parsers for model output formats produced by the orchestrator's prompts.
+﻿// Parsers for model output formats produced by the orchestrator's prompts.
 //
 // Source of truth for the EMITTED formats is server/src/orchestrator/prompts.ts.
 // These functions deliberately mirror the server-side parseRanking /
@@ -11,7 +11,7 @@
 //    the prompt definition)
 //  - this file
 
-import type { ModelName } from './models.ts'
+import type { DebateModelName } from './models.ts'
 
 // -------- Anonymous labels ------------------------------------------------
 
@@ -101,7 +101,7 @@ export function parseRanking(text: string): AnonLabel[] | null {
 // Aggregate per-reviewer rankings into average rank per anonymous label.
 // Lower avgRank = better; never produced=null entries are skipped.
 export function aggregateRankings(
-  phase3: { reviewer: ModelName; content: string }[]
+  phase3: { reviewer: DebateModelName; content: string }[]
 ): Record<AnonLabel, number | null> {
   const sums: Record<AnonLabel, { sum: number; count: number }> = {
     甲: { sum: 0, count: 0 }, 乙: { sum: 0, count: 0 }, 丙: { sum: 0, count: 0 },

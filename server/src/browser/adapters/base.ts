@@ -10,7 +10,26 @@ export interface ClaudeConfig {
   model: 'sonnet-4-6' | 'opus-4-7'
 }
 
-export type ModelConfig = DeepSeekConfig | ClaudeConfig | Record<string, never>
+export interface GeminiConfig {
+  targetModel: 'gemini-pro'
+  manualConfirm: boolean
+}
+
+export interface ChatGPTConfig {
+  targetModel: 'highest-thinking'
+  manualConfirm: boolean
+}
+
+export interface RuntimeStatus {
+  loggedIn: boolean
+  requestedModel?: string
+  detectedModel?: string
+  configured: boolean
+  needsManualConfirmation: boolean
+  warning?: string
+}
+
+export type ModelConfig = DeepSeekConfig | ClaudeConfig | GeminiConfig | ChatGPTConfig | Record<string, never>
 
 export interface SiteAdapter {
   readonly name: string
@@ -34,6 +53,7 @@ export interface SiteAdapter {
    */
   hasAssistantMessage(): Promise<boolean>
   configure?(config: ModelConfig): Promise<void>
+  getRuntimeStatus?(): Promise<RuntimeStatus>
 }
 
 export async function humanType(page: Page, selector: string, text: string): Promise<void> {

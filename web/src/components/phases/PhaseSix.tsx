@@ -1,6 +1,6 @@
-import ReactMarkdown from 'react-markdown'
+﻿import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ModelName } from '../../lib/models.ts'
+import type { DebateModelName } from '../../lib/models.ts'
 import type { ModelStream } from '../../hooks/useDebateSocket.ts'
 import { MODELS, MODEL_META } from '../../lib/models.ts'
 import { parseVerdict } from '../../lib/parseDebateOutput.ts'
@@ -22,11 +22,11 @@ function verdictBadge(content: string | undefined): Badge | null {
 }
 
 export default function PhaseSixView(props: {
-  panels: Partial<Record<ModelName, ModelStream | null>>
-  synthesizer: ModelName | undefined
+  panels: Partial<Record<DebateModelName, ModelStream | null>>
+  synthesizer: DebateModelName | undefined
   isActivePhase: boolean
   isAborted: boolean
-  onRefetch?: (model: ModelName) => void
+  onRefetch?: (model: DebateModelName) => void
 }) {
   const { panels, synthesizer, isActivePhase, isAborted, onRefetch } = props
   const reviewers = MODELS.filter(m => m !== synthesizer)
@@ -74,7 +74,7 @@ export default function PhaseSixView(props: {
 }
 
 function ReviewerCard({ model, stream, isActivePhase, onRefetch }: {
-  model: ModelName
+  model: DebateModelName
   stream: ModelStream | null
   isActivePhase: boolean
   onRefetch?: () => void

@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
-import type { ModelName } from '../lib/models.ts'
+﻿import { useEffect, useRef, useState } from 'react'
+import type { DebateModelName } from '../lib/models.ts'
 import type { DebatePhase } from '../lib/phases.ts'
 
 // Re-export so existing callers that imported these via this hook keep working.
 // New code should import from lib/models.ts and lib/phases.ts directly.
-export type { ModelName, DebatePhase }
+export type { DebateModelName, DebatePhase }
 
 export interface WSEvent {
   type: 'phase_started' | 'delta' | 'message_complete' | 'summary' | 'done' | 'error'
   debateId: string
   phase?: DebatePhase
-  model?: ModelName
+  model?: DebateModelName
   content?: string
   error?: string
 }
@@ -23,7 +23,7 @@ export interface ModelStream {
 
 export interface DebateState {
   phase: DebatePhase
-  streams: Record<ModelName, ModelStream[]>
+  streams: Record<DebateModelName, ModelStream[]>
   summary: { comparison: string; finalProposal: string; dissent?: string } | null
   done: boolean
   error: string | null

@@ -1,7 +1,7 @@
 import { CDPSession } from '../browser/cdp.js'
 import type { SiteAdapter, ModelConfig } from '../browser/adapters/base.js'
 import { MODELS, makeAdapters, DEFAULT_MODEL_CONFIGS } from '../browser/adapters/index.js'
-import type { ModelName, ModelConfigs } from '../browser/adapters/index.js'
+import type { DebateModelName, ModelConfigs } from '../browser/adapters/index.js'
 import {
   PHASE2_PROMPT, PHASE3_PROMPT, PHASE4_PROMPT, PHASE5_PROMPT, PHASE6_PROMPT,
 } from './prompts.js'
@@ -22,7 +22,7 @@ export interface WSEvent {
   type: 'phase_started' | 'delta' | 'message_complete' | 'summary' | 'done' | 'error'
   debateId: string
   phase?: DebatePhase
-  model?: ModelName
+  model?: DebateModelName
   content?: string
   error?: string
 }
@@ -38,7 +38,7 @@ type EventEmitter = (event: WSEvent) => void
 async function runModel(
   debateId: string,
   phase: DebatePhase,
-  model: ModelName,
+  model: DebateModelName,
   adapter: SiteAdapter,
   prompt: string,
   emit: EventEmitter,
@@ -73,7 +73,7 @@ export async function runDebate(
   debateId: string,
   topic: string,
   principles: string,
-  synthesizer: ModelName,
+  synthesizer: DebateModelName,
   cdp: CDPSession,
   emit: EventEmitter,
   modelConfigs: ModelConfigs = DEFAULT_MODEL_CONFIGS
@@ -92,7 +92,7 @@ export async function runDebate(
   // Phase 2 — 各自方案 (parallel, opens a FRESH conversation per model).
   // All later phases continue in this same conversation for each model.
   // -------------------------------------------------------------------------
-  const phase2Results: { name: ModelName; content: string }[] = []
+  const phase2Results: { name: DebateModelName; content: string }[] = []
   await Promise.all(MODELS.map(async model => {
     const prompt = PHASE2_PROMPT(topic, principles, model)
     const content = await runModel(
@@ -109,11 +109,11 @@ export async function runDebate(
   // evaluate fairly anyway".
   // -------------------------------------------------------------------------
   const anonymized = anonymizeProposals(phase2Results)
-  const labelByName: Record<ModelName, AnonLabel> = Object.fromEntries(
+  const labelByName: Record<DebateModelName, AnonLabel> = Object.fromEntries(
     anonymized.map(a => [a.originalName, a.label])
-  ) as Record<ModelName, AnonLabel>
+  ) as Record<DebateModelName, AnonLabel>
 
-  const phase3Results: { name: ModelName; content: string; ranking: AnonLabel[] | null }[] = []
+  const phase3Results: { name: DebateModelName; content: string; ranking: AnonLabel[] | null }[] = []
   await Promise.all(MODELS.map(async model => {
     const prompt = PHASE3_PROMPT(anonymized, labelByName[model])
     const content = await runModel(
@@ -138,7 +138,7 @@ export async function runDebate(
   // context, so the prompt only needs to hand over the OTHER reviewers'
   // critiques + the aggregated ranking.
   // -------------------------------------------------------------------------
-  const phase4Results: { name: ModelName; content: string }[] = []
+  const phase4Results: { name: DebateModelName; content: string }[] = []
   await Promise.all(MODELS.map(async model => {
     const myLabel = labelByName[model]
     const otherCritiques = phase3Results

@@ -11,6 +11,17 @@ interface DebateRow {
   completed_at?: number
 }
 
+interface MeetingRow {
+  id: string
+  title: string
+  goal: string
+  moderator: string
+  mode: string
+  status: string
+  created_at: number
+  completed_at?: number
+}
+
 const STATUS_LABEL: Record<string, string> = {
   pending: '待付印',
   running: '即时印行',
@@ -33,6 +44,7 @@ const MODEL_DISPLAY: Record<string, string> = {
 
 export default function Home() {
   const [debates, setDebates] = useState<DebateRow[]>([])
+  const [meetings, setMeetings] = useState<MeetingRow[]>([])
   const [loading, setLoading] = useState(true)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -41,9 +53,15 @@ export default function Home() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    fetch('/api/debates')
-      .then(r => r.json())
-      .then(d => { setDebates(d); setLoading(false) })
+    Promise.all([
+      fetch('/api/debates').then(r => r.json()),
+      fetch('/api/meetings').then(r => r.json()).catch(() => []),
+    ])
+      .then(([debatesData, meetingsData]) => {
+        setDebates(debatesData)
+        setMeetings(meetingsData)
+        setLoading(false)
+      })
       .catch(err => { console.error(err); setLoading(false) })
   }, [])
 
@@ -149,14 +167,19 @@ export default function Home() {
           </p>
         </div>
 
-        <button className="primary" onClick={() => navigate('/new')}>
-          拟订新议题
-        </button>
+        <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
+          <button className="primary" onClick={() => navigate('/meetings/new')}>
+            新建会议
+          </button>
+          <button className="ghost" onClick={() => navigate('/new')}>
+            旧版辩论
+          </button>
+        </div>
       </header>
 
       {loading ? (
         <p className="byline faint">载入中…</p>
-      ) : debates.length === 0 ? (
+      ) : meetings.length === 0 && debates.length === 0 ? (
         <div className="fade-up" style={{
           textAlign: 'center',
           padding: '5rem 1rem',
@@ -174,11 +197,67 @@ export default function Home() {
             尚无任何论辩记录在档
           </p>
           <button className="primary" onClick={() => navigate('/new')}>
-            刊发第一期
+            新建会议
           </button>
         </div>
       ) : (
         <div>
+          {meetings.length > 0 && (
+            <section style={{ marginBottom: '3rem' }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '90px 1fr 130px 100px',
+                gap: '1.5rem',
+                alignItems: 'baseline',
+                paddingBottom: '0.7rem',
+                borderBottom: '1px solid var(--rule)',
+                marginBottom: '0.5rem',
+              }}>
+                <div className="byline">日期</div>
+                <div className="byline">会议</div>
+                <div className="byline">主持人</div>
+                <div className="byline" style={{ textAlign: 'right' }}>状态</div>
+              </div>
+              {meetings.map(m => {
+                const dt = dateOf(m.created_at)
+                return (
+                  <article
+                    key={m.id}
+                    className="archive-row fade-up"
+                    onClick={() => navigate(`/meetings/${m.id}`)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '90px 1fr 130px 100px',
+                      gap: '1.5rem',
+                      alignItems: 'baseline',
+                      padding: '1.2rem 0',
+                      borderBottom: '1px solid var(--rule-soft)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div className="byline faint">{dt.month} {dt.day}</div>
+                    <div>
+                      <h3 className="display" style={{ fontSize: 20, color: 'var(--paper)', marginBottom: '0.2rem' }}>
+                        {m.title}
+                      </h3>
+                      <p style={{ color: 'var(--paper-mute)', fontSize: 14, lineHeight: 1.45 }}>
+                        {m.goal.slice(0, 100)}{m.goal.length > 100 ? '…' : ''}
+                      </p>
+                    </div>
+                    <div className="display" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--paper-mute)' }}>
+                      {MODEL_DISPLAY[m.moderator] ?? m.moderator}
+                    </div>
+                    <div className="byline" style={{ textAlign: 'right', color: STATUS_COLOR[m.status] ?? 'var(--paper-mute)' }}>
+                      {STATUS_LABEL[m.status] ?? m.status}
+                    </div>
+                  </article>
+                )
+              })}
+            </section>
+          )}
+
+          {debates.length > 0 && (
+          <>
           {/* Editorial archive header */}
           <div style={{
             display: 'grid',
@@ -311,6 +390,8 @@ export default function Home() {
                 </article>
             )
           })}
+          </>
+          )}
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import PhaseStrip from '../components/PhaseStrip.tsx'
 import PhaseFooterNav from '../components/PhaseFooterNav.tsx'
@@ -7,7 +7,7 @@ import {
 } from '../components/phases/index.ts'
 import { useDebateSocket, type ModelStream } from '../hooks/useDebateSocket.ts'
 import { useRefetchMessage } from '../hooks/useRefetchMessage.ts'
-import { MODELS, type ModelName } from '../lib/models.ts'
+import { MODELS, type DebateModelName } from '../lib/models.ts'
 import type { DebatePhase } from '../lib/phases.ts'
 import { displayTitle, topicBody } from '../lib/displayTopic.ts'
 import ReactMarkdown from 'react-markdown'
@@ -15,7 +15,7 @@ import remarkGfm from 'remark-gfm'
 
 interface StoredMessage {
   phase: number
-  model: ModelName
+  model: DebateModelName
   content: string
 }
 
@@ -32,9 +32,9 @@ const STATUS_LABEL: Record<string, string> = {
   error: '终止付印',
 }
 
-type ByPhase = Record<DebatePhase, Partial<Record<ModelName, ModelStream | null>>>
+type ByPhase = Record<DebatePhase, Partial<Record<DebateModelName, ModelStream | null>>>
 
-function transposeByPhase(streams: Record<ModelName, ModelStream[]>): ByPhase {
+function transposeByPhase(streams: Record<DebateModelName, ModelStream[]>): ByPhase {
   const out: ByPhase = { 1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {} }
   for (const model of MODELS) {
     for (const s of streams[model] ?? []) {
@@ -48,7 +48,7 @@ export default function DebateView() {
   const { id } = useParams<{ id: string }>()
   const [debate, setDebate] = useState<any>(null)
   const [liveMode, setLiveMode] = useState(false)
-  const [staticStreams, setStaticStreams] = useState<Record<ModelName, ModelStream[]>>({
+  const [staticStreams, setStaticStreams] = useState<Record<DebateModelName, ModelStream[]>>({
     claude: [], chatgpt: [], deepseek: [],
   })
   const [staticSummary, setStaticSummary] = useState<
@@ -67,7 +67,7 @@ export default function DebateView() {
         const isActive = data.debate.status === 'pending' || data.debate.status === 'running'
         setLiveMode(isActive)
 
-        const streams: Record<ModelName, ModelStream[]> = { claude: [], chatgpt: [], deepseek: [] }
+        const streams: Record<DebateModelName, ModelStream[]> = { claude: [], chatgpt: [], deepseek: [] }
         for (const msg of data.messages) {
           if (!streams[msg.model]) streams[msg.model] = []
           streams[msg.model].push({
@@ -87,7 +87,7 @@ export default function DebateView() {
   }, [id])
 
   // Merge static (already-stored) + live (streaming) message streams.
-  const streams: Record<ModelName, ModelStream[]> = liveMode
+  const streams: Record<DebateModelName, ModelStream[]> = liveMode
     ? Object.fromEntries(MODELS.map(m => {
         const stat = staticStreams[m] ?? []
         const live = liveState.streams[m] ?? []
@@ -99,7 +99,7 @@ export default function DebateView() {
         }
         merged.sort((a, b) => a.phase - b.phase)
         return [m, merged]
-      })) as Record<ModelName, ModelStream[]>
+      })) as Record<DebateModelName, ModelStream[]>
     : staticStreams
 
   const byPhase = useMemo(() => transposeByPhase(streams), [streams])
@@ -148,7 +148,7 @@ export default function DebateView() {
     ? new Date(debate.created_at).toLocaleDateString('zh-CN',
         { year: 'numeric', month: 'long', day: 'numeric' })
     : ''
-  const synthesizer = debate?.synthesizer as ModelName | undefined
+  const synthesizer = debate?.synthesizer as DebateModelName | undefined
 
   // The URL path itself ends in .md (server accepts an optional :filename
   // segment for cosmetics). Even if the browser strips Content-Disposition

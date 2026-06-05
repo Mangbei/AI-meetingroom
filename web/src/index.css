@@ -35,6 +35,8 @@
   --sage-faint: rgba(141, 178, 106, 0.12);
   --azure:   #7da3c8;        /* deepseek */
   --azure-faint: rgba(125, 163, 200, 0.12);
+  --violet:  #b491d9;        /* gemini */
+  --violet-faint: rgba(180, 145, 217, 0.12);
 
   /* Type stack — no sans-serif anywhere. Commit to the editorial direction. */
   --serif-display: 'Fraunces', 'Songti SC', 'Source Han Serif SC', 'STSong', serif;

@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+﻿import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ModelName } from '../lib/models.ts'
+import type { DebateModelName } from '../lib/models.ts'
 import type { ModelStream } from '../hooks/useDebateSocket.ts'
 import { MODEL_META } from '../lib/models.ts'
 import RefetchButton from './RefetchButton.tsx'
@@ -14,7 +14,7 @@ import RefetchButton from './RefetchButton.tsx'
 const CONTENT_MAX_PX = 560
 
 interface Props {
-  model: ModelName
+  model: DebateModelName
   stream: ModelStream | null
   isActivePhase: boolean
   /** When true, render this column as "本环节不参与" (e.g., synthesizer in Phase 6 review). */

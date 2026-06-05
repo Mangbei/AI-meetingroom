@@ -1,4 +1,4 @@
-import type { ModelName } from '../../lib/models.ts'
+﻿import type { DebateModelName } from '../../lib/models.ts'
 import type { ModelStream } from '../../hooks/useDebateSocket.ts'
 import { MODELS } from '../../lib/models.ts'
 import ModelPanel from '../ModelPanel.tsx'
@@ -6,9 +6,9 @@ import ModelPanel from '../ModelPanel.tsx'
 // Generic 3-column grid used by Phase II and Phase IV.
 // Each ModelPanel inside self-caps height and provides per-column expand.
 export default function ThreeColumns({ panels, isActivePhase, onRefetch }: {
-  panels: Partial<Record<ModelName, ModelStream | null>>
+  panels: Partial<Record<DebateModelName, ModelStream | null>>
   isActivePhase: boolean
-  onRefetch?: (model: ModelName) => void
+  onRefetch?: (model: DebateModelName) => void
 }) {
   return (
     <div style={{

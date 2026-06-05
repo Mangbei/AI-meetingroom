@@ -2,8 +2,10 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { IncomingMessage } from 'http'
 import { Server } from 'http'
 import type { WSEvent } from '../orchestrator/debate.js'
+import type { MeetingEvent } from '../meeting/meeting.js'
 
-export type WsClients = Map<string, Set<(event: WSEvent) => void>>
+export type WsEvent = WSEvent | MeetingEvent
+export type WsClients = Map<string, Set<(event: WsEvent) => void>>
 
 export function attachWebSocket(server: Server): WsClients {
   // No `path` option: ws's path option is a strict match, but we want to
@@ -12,8 +14,8 @@ export function attachWebSocket(server: Server): WsClients {
   const clients: WsClients = new Map()
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-    // expect path like /ws/debates/:id
-    const match = req.url?.match(/\/ws\/debates\/([^/]+)/)
+    // expect path like /ws/debates/:id or /ws/meetings/:id
+    const match = req.url?.match(/\/ws\/(?:debates|meetings)\/([^/]+)/)
     if (!match) {
       ws.close(1008, 'invalid path')
       return
@@ -21,7 +23,7 @@ export function attachWebSocket(server: Server): WsClients {
     const debateId = match[1]
 
     if (!clients.has(debateId)) clients.set(debateId, new Set())
-    const emit = (event: WSEvent) => {
+    const emit = (event: WsEvent) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(event))
       }

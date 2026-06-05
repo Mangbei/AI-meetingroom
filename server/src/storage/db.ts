@@ -34,6 +34,7 @@ try {
 // server process (it can't be in-flight on a freshly-started server). Mark them
 // as 'error' so the UI shows whatever partial messages were captured.
 _db.exec(`UPDATE debates SET status = 'error' WHERE status IN ('pending', 'running')`)
+_db.exec(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`)
 
 // Minimal wrapper matching the better-sqlite3 API used in the codebase
 export const db = {

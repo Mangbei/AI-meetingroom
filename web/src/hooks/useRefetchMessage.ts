@@ -1,13 +1,13 @@
-import type { ModelName } from '../lib/models.ts'
+﻿import type { DebateModelName } from '../lib/models.ts'
 import type { DebatePhase } from '../lib/phases.ts'
 import type { ModelStream } from './useDebateSocket.ts'
 
 // Server-side row shapes returned by GET /api/debates/:id.
-interface StoredMessage { phase: number; model: ModelName; content: string }
+interface StoredMessage { phase: number; model: DebateModelName; content: string }
 interface StoredSummary { comparison: string; final_proposal: string; dissent?: string }
 
 interface ApplyArgs {
-  streams: Record<ModelName, ModelStream[]>
+  streams: Record<DebateModelName, ModelStream[]>
   summary: { comparison: string; finalProposal: string; dissent?: string } | null
 }
 
@@ -24,7 +24,7 @@ export function useRefetchMessage(
   debateId: string | undefined,
   apply: (args: ApplyArgs) => void,
 ) {
-  return async function refetch(phase: DebatePhase, model: ModelName): Promise<void> {
+  return async function refetch(phase: DebatePhase, model: DebateModelName): Promise<void> {
     if (!debateId) return
     try {
       const res = await fetch(`/api/debates/${debateId}/messages/refetch`, {
@@ -40,7 +40,7 @@ export function useRefetchMessage(
       const detail = await fetch(`/api/debates/${debateId}`).then(r => r.json()) as {
         messages: StoredMessage[]; summary?: StoredSummary
       }
-      const streams: Record<ModelName, ModelStream[]> = { claude: [], chatgpt: [], deepseek: [] }
+      const streams: Record<DebateModelName, ModelStream[]> = { claude: [], chatgpt: [], deepseek: [] }
       for (const msg of detail.messages) {
         streams[msg.model].push({
           phase: msg.phase as DebatePhase,

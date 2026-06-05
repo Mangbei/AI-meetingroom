@@ -1,11 +1,12 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
 
-type SiteName = 'chatgpt' | 'claude' | 'deepseek'
+type SiteName = 'chatgpt' | 'claude' | 'deepseek' | 'gemini'
 
 const SITE_URLS: Record<SiteName, string> = {
   chatgpt: 'https://chatgpt.com',
   claude: 'https://claude.ai',
   deepseek: 'https://chat.deepseek.com',
+  gemini: 'https://gemini.google.com',
 }
 
 // Each site's login-page URL fragment (when NOT logged in)
@@ -13,11 +14,13 @@ const LOGIN_URL_FRAGMENTS: Record<SiteName, string[]> = {
   chatgpt: [],                         // ChatGPT stays at / even when logged out — use DOM check
   claude: ['/login'],
   deepseek: ['/sign_in', '/signin'],
+  gemini: ['accounts.google.com'],
 }
 
 // DOM selector that is present ONLY when logged out
 const LOGGED_OUT_SELECTOR: Partial<Record<SiteName, string>> = {
   chatgpt: 'button[data-testid="login-button"]',
+  gemini: 'a[href*="accounts.google.com"], button:has-text("Sign in"), button:has-text("登录")',
 }
 
 export class CDPSession {
@@ -49,6 +52,16 @@ export class CDPSession {
     return page
   }
 
+  async openSites(sites: SiteName[]): Promise<Record<SiteName, string>> {
+    const opened = {} as Record<SiteName, string>
+    for (const site of sites) {
+      const page = await this.ensurePage(site)
+      await page.bringToFront().catch(() => {})
+      opened[site] = page.url()
+    }
+    return opened
+  }
+
   getContext(): BrowserContext {
     return this.context
   }
@@ -78,7 +91,7 @@ export class CDPSession {
   }
 
   async allLoggedIn(): Promise<Record<SiteName, boolean>> {
-    const sites: SiteName[] = ['chatgpt', 'claude', 'deepseek']
+    const sites: SiteName[] = ['chatgpt', 'claude', 'deepseek', 'gemini']
     const results = await Promise.all(sites.map(s => this.checkLoginStatus(s)))
     return Object.fromEntries(sites.map((s, i) => [s, results[i]])) as Record<SiteName, boolean>
   }

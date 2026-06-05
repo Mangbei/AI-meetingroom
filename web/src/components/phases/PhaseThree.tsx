@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import type { ModelName } from '../../lib/models.ts'
+﻿import { useMemo } from 'react'
+import type { DebateModelName } from '../../lib/models.ts'
 import type { ModelStream } from '../../hooks/useDebateSocket.ts'
 import { MODELS, MODEL_META, MODEL_ABBR } from '../../lib/models.ts'
 import {
@@ -23,9 +23,9 @@ const SECTIONS: { id: CritiqueSection; label: string; tone: string }[] = [
 ]
 
 export default function PhaseThreeView(props: {
-  panels: Partial<Record<ModelName, ModelStream | null>>
+  panels: Partial<Record<DebateModelName, ModelStream | null>>
   /** Fixed mapping: Phase 2 order → anon label. anonOrder[i] is the author of 甲/乙/丙. */
-  anonOrder: ModelName[]
+  anonOrder: DebateModelName[]
   isActivePhase: boolean
   isAborted: boolean
 }) {
@@ -78,7 +78,7 @@ export default function PhaseThreeView(props: {
 
 function TargetCard({ label, author, rank, sections }: {
   label: AnonLabel
-  author: ModelName | undefined
+  author: DebateModelName | undefined
   rank: number | null
   sections: CritiquesByTarget[AnonLabel]
 }) {
@@ -194,11 +194,11 @@ function TargetCard({ label, author, rank, sections }: {
                       fontFamily: 'var(--mono)',
                       fontSize: 9.5,
                       letterSpacing: '0.12em',
-                      color: MODEL_META[p.reviewer as ModelName].tone,
+                      color: MODEL_META[p.reviewer as DebateModelName].tone,
                       marginRight: '0.4rem',
                       fontWeight: 600,
                     }}>
-                      {MODEL_ABBR[p.reviewer as ModelName] ?? p.reviewer}
+                      {MODEL_ABBR[p.reviewer as DebateModelName] ?? p.reviewer}
                     </span>
                     {p.text}
                   </li>

@@ -1,16 +1,16 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { MODEL_META } from '../lib/models.ts'
-import type { ModelName } from '../lib/models.ts'
+import type { DebateModelName } from '../lib/models.ts'
 
-type LoginStatus = Record<ModelName, boolean>
+type LoginStatus = Record<DebateModelName, boolean>
 type ClaudeModel = 'sonnet-4-6' | 'opus-4-7'
 type DeepSeekMode = 'fast' | 'expert'
 
 export default function NewDebate() {
   const [topic, setTopic] = useState('')
   const [principles, setPrinciples] = useState('')
-  const [synthesizer, setSynthesizer] = useState<ModelName>('claude')
+  const [synthesizer, setSynthesizer] = useState<DebateModelName>('claude')
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>('sonnet-4-6')
   const [deepseekMode, setDeepseekMode] = useState<DeepSeekMode>('fast')
   const [deepseekSmartSearch, setDeepseekSmartSearch] = useState(true)
@@ -127,7 +127,7 @@ export default function NewDebate() {
         }}>
           <span className="byline">论辩参与方就绪状况</span>
           <div style={{ display: 'flex', gap: '1.6rem', flexWrap: 'wrap' }}>
-            {(['claude', 'chatgpt', 'deepseek'] as ModelName[]).map(m => (
+            {(['claude', 'chatgpt', 'deepseek'] as DebateModelName[]).map(m => (
               <span key={m} style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 fontFamily: 'var(--serif-display)',
@@ -195,7 +195,7 @@ export default function NewDebate() {
         <div className="field fade-up">
           <label>第 三 项 · 综合者</label>
           <div style={{ display: 'flex', gap: '0.6rem' }}>
-            {(['claude', 'chatgpt', 'deepseek'] as ModelName[]).map(m => (
+            {(['claude', 'chatgpt', 'deepseek'] as DebateModelName[]).map(m => (
               <Pill key={m} active={synthesizer === m} onClick={() => setSynthesizer(m)} tone={MODEL_META[m].tone}>
                 {MODEL_META[m].display}
               </Pill>

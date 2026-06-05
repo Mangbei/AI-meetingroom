@@ -1,6 +1,6 @@
-import ReactMarkdown from 'react-markdown'
+﻿import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ModelName } from '../../lib/models.ts'
+import type { DebateModelName } from '../../lib/models.ts'
 import type { ModelStream } from '../../hooks/useDebateSocket.ts'
 import { MODEL_META } from '../../lib/models.ts'
 import PhaseHeader from './PhaseHeader.tsx'
@@ -16,7 +16,7 @@ interface Summary {
 }
 
 export default function PhaseFiveView(props: {
-  synthesizer: ModelName | undefined
+  synthesizer: DebateModelName | undefined
   stream: ModelStream | null | undefined
   summary: Summary | null
   isActivePhase: boolean

@@ -1,13 +1,13 @@
-import type { ModelName } from '../../lib/models.ts'
+﻿import type { DebateModelName } from '../../lib/models.ts'
 import type { ModelStream } from '../../hooks/useDebateSocket.ts'
 import PhaseHeader from './PhaseHeader.tsx'
 import ThreeColumns from './ThreeColumns.tsx'
 
 export default function PhaseTwoView(props: {
-  panels: Partial<Record<ModelName, ModelStream | null>>
+  panels: Partial<Record<DebateModelName, ModelStream | null>>
   isActivePhase: boolean
   isAborted: boolean
-  onRefetch?: (model: ModelName) => void
+  onRefetch?: (model: DebateModelName) => void
 }) {
   return (
     <section className="fade-up">
