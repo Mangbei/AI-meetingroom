@@ -31,7 +31,7 @@ async function main() {
   if (isFirstRun) {
     console.log('\n[server] First run detected!')
     console.log('[server] Please log into ChatGPT, Gemini, and DeepSeek in the browser window,')
-    console.log('[server] then click "已登录" in the web UI to continue.\n')
+    console.log('[server] then confirm the highest model choices in the web UI.\n')
   }
 
   const app = express()
@@ -43,7 +43,7 @@ async function main() {
 
   server.listen(PORT, () => {
     console.log(`[server] API listening on http://localhost:${PORT}`)
-    console.log(`[server] WebSocket on ws://localhost:${PORT}/ws/debates/:id`)
+    console.log(`[server] WebSocket on ws://localhost:${PORT}/ws/meetings/:id`)
   })
 
   process.on('SIGINT', async () => {

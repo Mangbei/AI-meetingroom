@@ -1,5 +1,5 @@
 /* ============================================================
-   辩论广场 · Editorial Room
+   AI Meeting Room · Editorial Room
    暖墨黑底 · 米色印纸文本 · 衬线 + 等宽 · Le Monde 式绛红
    ============================================================ */
 
@@ -29,7 +29,7 @@
   --gold:       #c8a35c;   /* used in code, dropcaps */
 
   /* Three voices — saturated but never neon */
-  --ochre:   #d4925f;        /* claude */
+  --ochre:   #d4925f;
   --ochre-faint: rgba(212, 146, 95, 0.12);
   --sage:    #8db26a;        /* chatgpt */
   --sage-faint: rgba(141, 178, 106, 0.12);

@@ -1,13 +1,12 @@
-// @ts-ignore — node:sqlite available in Node 22.5+
+// @ts-ignore node:sqlite is available in Node 22.5+
 import { DatabaseSync } from 'node:sqlite'
-import { homedir } from 'os'
-import { join } from 'path'
 import { mkdirSync, readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
-import { dirname } from 'path'
+import { dirname, join, resolve } from 'path'
 
-const DATA_DIR = join(homedir(), '.making-debate')
-const DB_PATH = join(DATA_DIR, 'debate.db')
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+const DATA_DIR = join(PROJECT_ROOT, '.local-data', 'db')
+const DB_PATH = join(DATA_DIR, 'meetingroom.db')
 
 mkdirSync(DATA_DIR, { recursive: true })
 
@@ -19,24 +18,11 @@ const schemaPath = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql')
 const schema = readFileSync(schemaPath, 'utf-8')
 _db.exec(schema)
 
-// Migrate existing databases that predate config columns
-for (const col of ['deepseek_config', 'claude_config']) {
-  try {
-    _db.exec(`ALTER TABLE debates ADD COLUMN ${col} TEXT NOT NULL DEFAULT '{}'`)
-  } catch { /* column already exists */ }
-}
-// 5-phase iteration: summaries gains a "dissent" (少数派意见) column.
-try {
-  _db.exec(`ALTER TABLE summaries ADD COLUMN dissent TEXT NOT NULL DEFAULT ''`)
-} catch { /* column already exists */ }
-
-// Orphan cleanup: any debate stuck at 'pending'/'running' belongs to a previous
-// server process (it can't be in-flight on a freshly-started server). Mark them
-// as 'error' so the UI shows whatever partial messages were captured.
-_db.exec(`UPDATE debates SET status = 'error' WHERE status IN ('pending', 'running')`)
+// Any meeting stuck at 'pending'/'running' belongs to a previous server process.
+// Mark it as 'error' so the UI shows captured partial output.
 _db.exec(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`)
 
-// Minimal wrapper matching the better-sqlite3 API used in the codebase
+// Minimal wrapper matching the better-sqlite3 API used in the codebase.
 export const db = {
   prepare(sql: string) {
     const stmt = _db.prepare(sql)

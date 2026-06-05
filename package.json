@@ -1,5 +1,5 @@
 {
-  "name": "making-debate",
+  "name": "ai-meetingroom",
   "private": true,
   "workspaces": ["server", "web"],
   "scripts": {

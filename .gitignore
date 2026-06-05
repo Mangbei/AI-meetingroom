@@ -23,6 +23,5 @@ web/dist/
 .idea/
 
 # Local agent / dev artifacts
-.claude/
 .playwright-mcp/
 .codex-run/

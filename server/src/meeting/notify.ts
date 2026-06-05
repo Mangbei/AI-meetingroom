@@ -11,7 +11,7 @@ export async function notifyMeetingDone(title: string, summaryPath: string): Pro
 Add-Type -AssemblyName System.Windows.Forms
 $n = New-Object System.Windows.Forms.NotifyIcon
 $n.Icon = [System.Drawing.SystemIcons]::Information
-$n.BalloonTipTitle = 'Making Debate'
+$n.BalloonTipTitle = 'AI Meeting Room'
 $n.BalloonTipText = ${JSON.stringify(message)}
 $n.Visible = $true
 $n.ShowBalloonTip(7000)

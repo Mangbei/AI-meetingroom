@@ -6,10 +6,6 @@ export interface DeepSeekConfig {
   smartSearch: boolean       // 智能搜索
 }
 
-export interface ClaudeConfig {
-  model: 'sonnet-4-6' | 'opus-4-7'
-}
-
 export interface GeminiConfig {
   targetModel: 'gemini-pro'
   manualConfirm: boolean
@@ -29,7 +25,7 @@ export interface RuntimeStatus {
   warning?: string
 }
 
-export type ModelConfig = DeepSeekConfig | ClaudeConfig | GeminiConfig | ChatGPTConfig | Record<string, never>
+export type ModelConfig = DeepSeekConfig | GeminiConfig | ChatGPTConfig | Record<string, never>
 
 export interface SiteAdapter {
   readonly name: string

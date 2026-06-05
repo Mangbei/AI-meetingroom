@@ -1,10 +1,12 @@
 import { spawn, ChildProcess } from 'child_process'
 import { existsSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { dirname, join, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import net from 'net'
 
-const PROFILE_DIR = join(homedir(), '.making-debate', 'profile')
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+const PROFILE_DIR = join(PROJECT_ROOT, '.local-data', 'browser-profile')
 const BASE_PORT = 9222
 
 const CHROME_PATHS_MAC = [

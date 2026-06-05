@@ -67,4 +67,3 @@ http://localhost:3001
 - 程序会打开/聚焦网页，但不会也不应该代替用户登录账号。
 - 首版只支持 `.txt` / `.md`，PDF 和 DOCX 需要先转成文本。
 - Gemini DOM 适配器是首版，若 Google 页面结构变化，可能需要更新选择器。
-- 旧版辩论代码仍保留在仓库中作为兼容模块，但主入口和新功能是 ChatGPT / Gemini / DeepSeek 会议室。

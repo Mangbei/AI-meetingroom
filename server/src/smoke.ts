@@ -3,21 +3,21 @@
  * "你好，请用一句话介绍你自己" to one adapter, printing the streamed response.
  *
  * Usage (with server already running):
- *   npm run smoke -- [claude|chatgpt|deepseek]
+ *   npm run smoke -- [chatgpt|gemini|deepseek]
  *
  * If the server is not running, pass --launch to start a browser first.
  */
 import { launchBrowser } from './browser/launcher.js'
 import { CDPSession } from './browser/cdp.js'
-import { ADAPTER_REGISTRY, MODELS } from './browser/adapters/index.js'
+import { ADAPTER_REGISTRY, MEETING_MODELS } from './browser/adapters/index.js'
 import type { ModelName } from './browser/adapters/index.js'
 
 const args = process.argv.slice(2)
-const target = (args.find(a => !a.startsWith('--')) ?? 'claude') as ModelName
+const target = (args.find(a => !a.startsWith('--')) ?? 'chatgpt') as ModelName
 const shouldLaunch = args.includes('--launch')
 
 if (!(target in ADAPTER_REGISTRY)) {
-  console.error('Unknown target:', target, `— use one of: ${MODELS.join(', ')}`)
+  console.error('Unknown target:', target, `— use one of: ${MEETING_MODELS.join(', ')}`)
   process.exit(1)
 }
 const adapter = ADAPTER_REGISTRY[target].ctor()

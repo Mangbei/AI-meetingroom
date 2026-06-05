@@ -1,5 +1,0 @@
-export { default as PhaseTwoView }   from './PhaseTwo.tsx'
-export { default as PhaseThreeView } from './PhaseThree.tsx'
-export { default as PhaseFourView }  from './PhaseFour.tsx'
-export { default as PhaseFiveView }  from './PhaseFive.tsx'
-export { default as PhaseSixView }   from './PhaseSix.tsx'

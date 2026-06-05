@@ -28,7 +28,7 @@ td.addRule('strip-chrome', {
   replacement: () => '',
 })
 
-// ChatGPT / Claude / DeepSeek all render a chrome strip above <pre> with
+// ChatGPT and DeepSeek render a chrome strip above <pre> with
 // a language label and copy buttons. Turndown's built-in fence rule reads
 // language from <code class="language-X">, so we only need to strip the
 // stray label so it doesn't appear as plain text before the fence.
@@ -47,7 +47,7 @@ td.addRule('strip-code-header', {
       const text = (node.textContent ?? '').trim()
       if (text.length > 0 && text.length <= 24 && /^[A-Za-z0-9+\-_#. ]+$/.test(text)) return true
     }
-    // (b) tiny div with only a language-name text, sibling of a <pre> (Claude)
+    // (b) tiny div with only a language-name text, sibling of a <pre>
     if (children.length === 0) {
       const text = (node.textContent ?? '').trim()
       if (text.length > 0 && text.length <= 15 && /^[A-Za-z0-9+\-_#.]+$/.test(text)) {
