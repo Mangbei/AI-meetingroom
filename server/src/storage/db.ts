@@ -18,6 +18,12 @@ const schemaPath = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql')
 const schema = readFileSync(schemaPath, 'utf-8')
 _db.exec(schema)
 
+try {
+  _db.exec(`ALTER TABLE meeting_files ADD COLUMN original_path TEXT NOT NULL DEFAULT ''`)
+} catch {
+  // Column already exists.
+}
+
 // Any meeting stuck at 'pending'/'running' belongs to a previous server process.
 // Mark it as 'error' so the UI shows captured partial output.
 _db.exec(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`)

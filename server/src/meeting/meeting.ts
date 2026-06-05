@@ -8,6 +8,9 @@ import {
 import { agendaPrompt, agendaSummaryPrompt, finalSummaryPrompt, type MeetingContext } from './prompts.js'
 import { archiveMeeting } from './archive.js'
 import { notifyMeetingDone } from './notify.js'
+import type { UploadedMeetingFile } from './files.js'
+
+export type { UploadedMeetingFile } from './files.js'
 
 export type MeetingEvent =
   | { type: 'agenda_started'; meetingId: string; agendaId: number; agendaIndex: number; question: string }
@@ -22,10 +25,11 @@ export type MeetingEvent =
 type Emit = (event: MeetingEvent) => void
 const APP_ORIGIN = process.env.APP_ORIGIN ?? 'http://localhost:5173'
 
-export interface UploadedMeetingFile {
-  filename: string
-  kind: 'txt' | 'md'
-  content: string
+type FileDeliveryMode = 'original-upload' | 'text-fallback'
+
+interface AdapterBundle {
+  adapters: Record<MeetingModelName, SiteAdapter>
+  fileDelivery: Partial<Record<MeetingModelName, FileDeliveryMode>>
 }
 
 export interface CreateMeetingInput {
@@ -74,11 +78,14 @@ async function runModelTurn(args: {
 }
 
 async function prepareAdapters(
+  meetingId: string,
   cdp: CDPSession,
   participants: MeetingModelName[],
   configs: MeetingModelConfigs,
-): Promise<Record<MeetingModelName, SiteAdapter>> {
+  originalFilePaths: string[],
+): Promise<AdapterBundle> {
   const adapters = {} as Record<MeetingModelName, SiteAdapter>
+  const fileDelivery: Partial<Record<MeetingModelName, FileDeliveryMode>> = {}
   for (const model of participants) {
     const page = await cdp.ensurePage(model)
     const adapter = ADAPTER_REGISTRY[model].ctor()
@@ -86,9 +93,42 @@ async function prepareAdapters(
     await adapter.ensureReady()
     await adapter.newConversation()
     if (adapter.configure) await adapter.configure(configs[model] as ModelConfig)
+    fileDelivery[model] = await uploadOriginalFiles(meetingId, model, adapter, originalFilePaths)
+      ? 'original-upload'
+      : 'text-fallback'
     adapters[model] = adapter
   }
-  return adapters
+  return { adapters, fileDelivery }
+}
+
+async function uploadOriginalFiles(
+  meetingId: string,
+  model: MeetingModelName,
+  adapter: SiteAdapter,
+  originalFilePaths: string[],
+): Promise<boolean> {
+  if (!originalFilePaths.length) return false
+  if (!adapter.uploadFiles) {
+    console.warn(`[meeting ${meetingId}] ${model} has no file upload hook; using text fallback`)
+    return false
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await adapter.focus?.()
+      const ok = await adapter.uploadFiles(originalFilePaths)
+      if (ok) {
+        console.log(`[meeting ${meetingId}] uploaded original files to ${model} on attempt ${attempt}`)
+        return true
+      }
+    } catch (err) {
+      console.warn(`[meeting ${meetingId}] original file upload failed for ${model} on attempt ${attempt}:`, err)
+    }
+    await new Promise(r => setTimeout(r, 1000))
+  }
+
+  console.warn(`[meeting ${meetingId}] original file upload unavailable for ${model}; using text fallback`)
+  return false
 }
 
 export async function runMeeting(
@@ -112,16 +152,25 @@ export async function runMeeting(
     gemini: input.modelConfigs?.gemini ?? DEFAULT_MEETING_MODEL_CONFIGS.gemini,
   }
 
-  const ctx: MeetingContext = {
+  const baseCtx: Omit<MeetingContext, 'files'> = {
     title: input.title,
     goal: input.goal,
     mode: input.mode,
     participants: input.participants,
     moderator: input.moderator,
-    files: storedFiles.map(f => ({ filename: f.filename, content: f.content })),
   }
 
-  const adapters = await prepareAdapters(cdp, input.participants, configs)
+  const originalFilePaths = storedFiles.map(f => f.original_path).filter(Boolean)
+  const { adapters, fileDelivery } = await prepareAdapters(meetingId, cdp, input.participants, configs, originalFilePaths)
+  const ctxFor = (model: MeetingModelName): MeetingContext => ({
+    ...baseCtx,
+    files: fileDelivery[model] === 'original-upload'
+      ? storedFiles.map(f => ({
+          filename: f.filename,
+          content: `[Original file uploaded to this AI session: ${f.filename}. Please prioritize the attached file in the chat UI. If the site did not ingest the attachment correctly, use the meeting discussion context and say so explicitly.]`,
+        }))
+      : storedFiles.map(f => ({ filename: f.filename, content: f.content })),
+  })
   const agendaSummaries: { question: string; summary: string }[] = []
   let turnIndex = 0
 
@@ -139,7 +188,7 @@ export async function runMeeting(
           role: 'participant',
           model,
           adapter: adapters[model],
-          prompt: agendaPrompt({ ctx, agendaIndex, question: item.question, model, previousTurns: [] }),
+          prompt: agendaPrompt({ ctx: ctxFor(model), agendaIndex, question: item.question, model, previousTurns: [] }),
           emit,
         })
         return { model, content }
@@ -154,7 +203,7 @@ export async function runMeeting(
           role: 'participant',
           model,
           adapter: adapters[model],
-          prompt: agendaPrompt({ ctx, agendaIndex, question: item.question, model, previousTurns: turns }),
+          prompt: agendaPrompt({ ctx: ctxFor(model), agendaIndex, question: item.question, model, previousTurns: turns }),
           emit,
         })
         turns.push({ model, content })
@@ -168,7 +217,7 @@ export async function runMeeting(
       role: 'agenda_summary',
       model: input.moderator,
       adapter: adapters[input.moderator],
-      prompt: agendaSummaryPrompt({ ctx, agendaIndex, question: item.question, turns }),
+      prompt: agendaSummaryPrompt({ ctx: ctxFor(input.moderator), agendaIndex, question: item.question, turns }),
       emit,
     })
     agendaItems.updateSummary(item.id, summary)
@@ -183,7 +232,7 @@ export async function runMeeting(
     role: 'final_summary',
     model: input.moderator,
     adapter: adapters[input.moderator],
-    prompt: finalSummaryPrompt({ ctx, agendaSummaries }),
+    prompt: finalSummaryPrompt({ ctx: ctxFor(input.moderator), agendaSummaries }),
     emit,
   })
 

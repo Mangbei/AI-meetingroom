@@ -33,6 +33,7 @@ export interface SiteAdapter {
   focus?(): Promise<void>
   ensureReady(): Promise<void>
   newConversation(): Promise<void>
+  uploadFiles?(filePaths: string[]): Promise<boolean>
   sendMessage(text: string): Promise<void>
   streamResponse(onDelta: (chunk: string) => void): Promise<string>
   /**

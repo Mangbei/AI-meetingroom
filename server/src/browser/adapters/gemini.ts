@@ -21,6 +21,14 @@ const SEL = {
     'button.send-button',
     'button:has(mat-icon:has-text("send"))',
   ].join(', '),
+  attachButton: [
+    'button[aria-label*="Upload"]',
+    'button[aria-label*="Attach"]',
+    'button[aria-label*="Add files"]',
+    'button:has(mat-icon:has-text("add"))',
+    'button:has(mat-icon:has-text("attach_file"))',
+  ].join(', '),
+  fileInput: 'input[type="file"]',
   responseCandidates: [
     'message-content.model-response-text',
     '.model-response-text',
@@ -91,6 +99,35 @@ export class GeminiAdapter implements SiteAdapter {
       await waitFor(800)
     }
     await this.page.locator(SEL.inputBox).first().waitFor({ timeout: 15_000 }).catch(() => {})
+  }
+
+  async uploadFiles(filePaths: string[]): Promise<boolean> {
+    if (!filePaths.length) return true
+    await this.ensureReady()
+
+    let input = this.page.locator(SEL.fileInput).first()
+    if ((await this.page.locator(SEL.fileInput).count().catch(() => 0)) === 0) {
+      const attach = this.page.locator(SEL.attachButton).first()
+      if (await attach.isVisible().catch(() => false)) {
+        await attach.click().catch(() => {})
+        await waitFor(500)
+      }
+      input = this.page.locator(SEL.fileInput).first()
+    }
+
+    if ((await this.page.locator(SEL.fileInput).count().catch(() => 0)) === 0) return false
+    try {
+      await input.setInputFiles(filePaths)
+    } catch {
+      for (const filePath of filePaths) {
+        input = this.page.locator(SEL.fileInput).first()
+        if ((await this.page.locator(SEL.fileInput).count().catch(() => 0)) === 0) return false
+        await input.setInputFiles(filePath)
+        await waitFor(1000)
+      }
+    }
+    await waitFor(5000)
+    return true
   }
 
   async sendMessage(text: string): Promise<void> {

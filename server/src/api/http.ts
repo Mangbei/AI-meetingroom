@@ -7,8 +7,14 @@ import type { RuntimeStatus } from '../browser/adapters/base.js'
 import {
   agendaItems, meetingArtifacts, meetingFiles, meetingMessages, meetings,
 } from '../storage/repository.js'
-import { runMeeting, type CreateMeetingInput, type MeetingEvent, type UploadedMeetingFile } from '../meeting/meeting.js'
+import { runMeeting, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
 import { renderMeetingMarkdown } from '../meeting/archive.js'
+import {
+  ACCEPTED_FILE_EXTENSIONS,
+  kindFromFilename,
+  prepareMeetingFiles,
+  type UploadedMeetingFile,
+} from '../meeting/files.js'
 
 type WsClients = Map<string, Set<(event: MeetingEvent) => void>>
 
@@ -43,60 +49,81 @@ function defaultRuntimeStatus(model: MeetingModelName, loggedIn: boolean, warnin
 
 export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
   const router = Router()
-  router.use(express.json({ limit: '12mb' }))
+  router.use(express.json({ limit: '80mb' }))
 
   router.post('/meetings', async (req, res) => {
-    const body = req.body as Partial<CreateMeetingInput> & {
-      confirmations?: Partial<Record<MeetingModelName, boolean>>
-    }
-    const title = (body.title ?? '').trim()
-    const goal = (body.goal ?? '').trim()
-    const mode = body.mode === 'parallel' ? 'parallel' : 'relay'
-    const participants = (body.participants ?? []).filter((m): m is MeetingModelName =>
-      MEETING_MODELS.includes(m as MeetingModelName))
-    const moderator = body.moderator as MeetingModelName | undefined
-    const agenda = (body.agenda ?? []).map(q => q.trim()).filter(Boolean)
-    const files = (body.files ?? []) as UploadedMeetingFile[]
-
-    if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
-    if (participants.length !== 3) return res.status(400).json({ error: '请选择 ChatGPT、Gemini、DeepSeek 三位参会者' })
-    if (!moderator || !participants.includes(moderator)) {
-      return res.status(400).json({ error: '主持人必须是参会模型之一' })
-    }
-    if (agenda.length === 0) return res.status(400).json({ error: '至少需要一个议程问题' })
-    for (const model of participants) {
-      if (!body.confirmations?.[model]) {
-        return res.status(400).json({ error: `请先确认 ${model} 已选择最高可用模型` })
+    try {
+      const body = req.body as Partial<CreateMeetingInput> & {
+        confirmations?: Partial<Record<MeetingModelName, boolean>>
       }
-    }
-    for (const file of files) {
-      if (!file.filename || !file.content) return res.status(400).json({ error: '上传文件需要文件名和内容' })
-      const lower = file.filename.toLowerCase()
-      if (!lower.endsWith('.txt') && !lower.endsWith('.md')) {
-        return res.status(400).json({ error: '首版仅支持 .txt 和 .md 文件' })
+      const title = (body.title ?? '').trim()
+      const goal = (body.goal ?? '').trim()
+      const mode = body.mode === 'parallel' ? 'parallel' : 'relay'
+      const participants = (body.participants ?? []).filter((m): m is MeetingModelName =>
+        MEETING_MODELS.includes(m as MeetingModelName))
+      const moderator = body.moderator as MeetingModelName | undefined
+      const agenda = (body.agenda ?? []).map(q => q.trim()).filter(Boolean)
+      const files = (body.files ?? []) as UploadedMeetingFile[]
+
+      if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
+      if (participants.length !== 3) {
+        return res.status(400).json({ error: '首版请同时选择 ChatGPT、Gemini、DeepSeek 三位参会者' })
       }
-    }
+      if (!moderator || !participants.includes(moderator)) {
+        return res.status(400).json({ error: '主持人必须是参会模型之一' })
+      }
+      if (agenda.length === 0) return res.status(400).json({ error: '至少需要一个议程问题' })
+      for (const model of participants) {
+        if (!body.confirmations?.[model]) {
+          return res.status(400).json({ error: `请先确认 ${model} 已选择最高可用模型` })
+        }
+      }
+      for (const file of files) {
+        if (!file.filename || (!file.dataBase64 && file.content == null)) {
+          return res.status(400).json({ error: '上传文件需要文件名和原始内容' })
+        }
+        if (!kindFromFilename(file.filename)) {
+          return res.status(400).json({
+            error: `暂不支持该文件格式：${file.filename}。当前支持：${ACCEPTED_FILE_EXTENSIONS.join(', ')}`,
+          })
+        }
+      }
 
-    const id = uuid()
-    meetings.create({ id, title, goal, mode, participants, moderator })
-    files.forEach(file => meetingFiles.insert(id, file.filename, file.kind, file.content))
-    agenda.forEach((question, position) => agendaItems.insert(id, position, question))
+      const id = uuid()
+      const preparedFiles = await prepareMeetingFiles(id, files)
+      meetings.create({ id, title, goal, mode, participants, moderator })
+      preparedFiles.forEach(file => meetingFiles.insert(id, file.filename, file.kind, file.content, file.originalPath))
+      agenda.forEach((question, position) => agendaItems.insert(id, position, question))
 
-    res.json({ id })
+      res.json({ id })
 
-    const input: CreateMeetingInput = {
-      title, goal, mode, participants, moderator, agenda, files,
-      modelConfigs: body.modelConfigs,
+      const input: CreateMeetingInput = {
+        title,
+        goal,
+        mode,
+        participants,
+        moderator,
+        agenda,
+        files: preparedFiles.map(file => ({
+          filename: file.filename,
+          kind: file.kind,
+          content: file.content,
+        })),
+        modelConfigs: body.modelConfigs,
+      }
+      const emit = (event: MeetingEvent) => {
+        const listeners = wsClients.get(id)
+        listeners?.forEach(fn => fn(event))
+      }
+      runMeeting(id, input, cdp, emit).catch(err => {
+        console.error('[meeting] fatal error:', err)
+        emit({ type: 'error', meetingId: id, error: String(err) })
+        meetings.setStatus(id, 'error')
+      })
+    } catch (err) {
+      console.error('[meetings create] failed:', err)
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }
-    const emit = (event: MeetingEvent) => {
-      const listeners = wsClients.get(id)
-      listeners?.forEach(fn => fn(event))
-    }
-    runMeeting(id, input, cdp, emit).catch(err => {
-      console.error('[meeting] fatal error:', err)
-      emit({ type: 'error', meetingId: id, error: String(err) })
-      meetings.setStatus(id, 'error')
-    })
   })
 
   router.get('/meetings', (_req, res) => {

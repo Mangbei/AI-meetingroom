@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS meeting_files (
   filename TEXT NOT NULL,
   kind TEXT NOT NULL,
   content TEXT NOT NULL,
+  original_path TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   FOREIGN KEY (meeting_id) REFERENCES meetings(id)
 );

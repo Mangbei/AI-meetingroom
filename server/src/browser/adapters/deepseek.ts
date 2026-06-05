@@ -5,6 +5,7 @@ import { htmlToMarkdown } from '../markdown.js'
 // All DeepSeek selectors — update here if UI changes
 // Verified against live chat.deepseek.com DOM on 2026-05-12
 const SEL = {
+  fileInput: 'input[type="file"]',
   newChatButton: 'button:has-text("New Chat"), [class*="newChat"], a:has-text("新对话"), button:has-text("新建对话")',
   // DeepSeek uses a <textarea> for input
   inputBox: 'textarea#chat-input, textarea[class*="chat"], textarea[class*="input"], textarea[placeholder]',
@@ -111,6 +112,26 @@ export class DeepSeekAdapter implements SiteAdapter {
       await waitFor(800)
     }
     await this.page.locator(SEL.inputBox).waitFor({ timeout: 10_000 }).catch(() => {})
+  }
+
+  async uploadFiles(filePaths: string[]): Promise<boolean> {
+    if (!filePaths.length) return true
+    await this.ensureReady()
+
+    let input = this.page.locator(SEL.fileInput).first()
+    if ((await this.page.locator(SEL.fileInput).count().catch(() => 0)) === 0) return false
+    try {
+      await input.setInputFiles(filePaths)
+    } catch {
+      for (const filePath of filePaths) {
+        input = this.page.locator(SEL.fileInput).first()
+        if ((await this.page.locator(SEL.fileInput).count().catch(() => 0)) === 0) return false
+        await input.setInputFiles(filePath)
+        await waitFor(1000)
+      }
+    }
+    await waitFor(5000)
+    return true
   }
 
   async sendMessage(text: string): Promise<void> {

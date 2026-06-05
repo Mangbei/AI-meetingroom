@@ -25,6 +25,7 @@ export interface MeetingFileRow {
   filename: string
   kind: string
   content: string
+  original_path: string
   created_at: number
 }
 
@@ -94,10 +95,10 @@ export const meetings = {
 }
 
 export const meetingFiles = {
-  insert(meetingId: string, filename: string, kind: string, content: string): void {
+  insert(meetingId: string, filename: string, kind: string, content: string, originalPath = ''): void {
     db.prepare(
-      'INSERT INTO meeting_files (meeting_id, filename, kind, content, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(meetingId, filename, kind, content, Date.now())
+      'INSERT INTO meeting_files (meeting_id, filename, kind, content, original_path, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(meetingId, filename, kind, content, originalPath, Date.now())
   },
 
   listByMeeting(meetingId: string): MeetingFileRow[] {

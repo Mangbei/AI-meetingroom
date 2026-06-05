@@ -3,11 +3,15 @@ import { Link, useNavigate } from 'react-router-dom'
 import { MEETING_MODELS, MODEL_META, type MeetingModelName } from '../lib/models.ts'
 
 type MeetingMode = 'relay' | 'parallel'
+type FileKind = 'txt' | 'md' | 'pdf' | 'docx' | 'doc' | 'xlsx' | 'xls' | 'csv'
 
 interface UploadFile {
   filename: string
-  kind: 'txt' | 'md'
-  content: string
+  kind: FileKind
+  mimeType: string
+  size: number
+  dataBase64: string
+  preview: string
 }
 
 interface RuntimeStatus {
@@ -23,6 +27,73 @@ const TARGET_MODEL: Record<MeetingModelName, string> = {
   chatgpt: '最高 Thinking / Reasoning 模型',
   gemini: 'Gemini Pro / 最高 Pro 模型',
   deepseek: 'DeepSeek R1 + 深度思考',
+}
+
+const KIND_BY_EXT: Record<string, FileKind> = {
+  txt: 'txt',
+  md: 'md',
+  markdown: 'md',
+  pdf: 'pdf',
+  docx: 'docx',
+  doc: 'doc',
+  xlsx: 'xlsx',
+  xls: 'xls',
+  csv: 'csv',
+}
+
+const FILE_ACCEPT = [
+  '.txt',
+  '.md',
+  '.markdown',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+].join(',')
+
+const MAX_FILE_BYTES = 25 * 1024 * 1024
+const MAX_TOTAL_BYTES = 55 * 1024 * 1024
+
+function kindFromName(filename: string): FileKind | undefined {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  return ext ? KIND_BY_EXT[ext] : undefined
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const value = String(reader.result ?? '')
+      resolve(value.includes(',') ? value.slice(value.indexOf(',') + 1) : value)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function buildPreview(file: File, kind: FileKind): Promise<string> {
+  if (kind === 'txt' || kind === 'md' || kind === 'csv') {
+    const text = await file.text().catch(() => '')
+    return text.slice(0, 500)
+  }
+  return '原文件将优先直传给网页端 AI；后端已准备文本兜底。'
 }
 
 export default function NewMeeting() {
@@ -42,6 +113,7 @@ export default function NewMeeting() {
   const [runtimeStatus, setRuntimeStatus] = useState<Partial<Record<MeetingModelName, RuntimeStatus>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [openingTabs, setOpeningTabs] = useState(false)
+  const [readingFiles, setReadingFiles] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -53,23 +125,52 @@ export default function NewMeeting() {
 
   const canSubmit = useMemo(() => {
     return title.trim() && goal.trim() && agenda.some(q => q.trim()) &&
-      participants.every(m => confirmations[m])
-  }, [agenda, confirmations, goal, participants, title])
+      participants.every(m => confirmations[m]) && !readingFiles
+  }, [agenda, confirmations, goal, participants, readingFiles, title])
 
   const readFiles = async (list: FileList | null) => {
     if (!list) return
     setError('')
-    const next: UploadFile[] = []
-    for (const file of Array.from(list)) {
-      const lower = file.name.toLowerCase()
-      if (!lower.endsWith('.txt') && !lower.endsWith('.md')) {
-        setError('首版仅支持 .txt / .md。PDF 和 DOCX 下一版接入。')
-        continue
+    setReadingFiles(true)
+    try {
+      const currentTotal = files.reduce((sum, file) => sum + file.size, 0)
+      let nextTotal = currentTotal
+      const accepted: UploadFile[] = []
+      const rejected: string[] = []
+
+      for (const file of Array.from(list)) {
+        const kind = kindFromName(file.name)
+        if (!kind) {
+          rejected.push(`${file.name} 格式暂不支持`)
+          continue
+        }
+        if (file.size > MAX_FILE_BYTES) {
+          rejected.push(`${file.name} 超过 ${formatBytes(MAX_FILE_BYTES)}`)
+          continue
+        }
+        if (nextTotal + file.size > MAX_TOTAL_BYTES) {
+          rejected.push(`总上传体积超过 ${formatBytes(MAX_TOTAL_BYTES)}`)
+          break
+        }
+
+        nextTotal += file.size
+        accepted.push({
+          filename: file.name,
+          kind,
+          mimeType: file.type,
+          size: file.size,
+          dataBase64: await fileToBase64(file),
+          preview: await buildPreview(file, kind),
+        })
       }
-      const content = await file.text()
-      next.push({ filename: file.name, kind: lower.endsWith('.md') ? 'md' : 'txt', content })
+
+      if (accepted.length) setFiles(prev => [...prev, ...accepted])
+      if (rejected.length) setError(rejected.join('；'))
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err))
+    } finally {
+      setReadingFiles(false)
     }
-    setFiles(prev => [...prev, ...next])
   }
 
   const openMeetingTabs = async () => {
@@ -94,6 +195,13 @@ export default function NewMeeting() {
     setSubmitting(true)
     setError('')
     try {
+      const uploadPayload = files.map(file => ({
+        filename: file.filename,
+        kind: file.kind,
+        mimeType: file.mimeType,
+        size: file.size,
+        dataBase64: file.dataBase64,
+      }))
       const res = await fetch('/api/meetings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -104,7 +212,7 @@ export default function NewMeeting() {
           participants,
           moderator,
           agenda: agenda.map(q => q.trim()).filter(Boolean),
-          files,
+          files: uploadPayload,
           confirmations,
         }),
       })
@@ -143,21 +251,38 @@ export default function NewMeeting() {
         </div>
 
         <section style={{ margin: '2rem 0', paddingTop: '1.2rem', borderTop: '1px solid var(--rule)' }}>
-          <label>上传资料（.txt / .md）</label>
+          <label>上传资料</label>
           <input
             type="file"
             multiple
-            accept=".txt,.md,text/plain,text/markdown"
-            onChange={e => readFiles(e.target.files)}
+            accept={FILE_ACCEPT}
+            onChange={e => {
+              void readFiles(e.currentTarget.files)
+              e.currentTarget.value = ''
+            }}
             style={{ border: '1px solid var(--rule)', padding: '0.8rem', background: 'var(--ink-2)' }}
           />
           <p className="byline faint" style={{ marginTop: '0.6rem', textTransform: 'none', letterSpacing: 0 }}>
-            PDF / DOCX 下一版支持；首版请先转成文本或 Markdown。
+            TXT、MD、PDF、Word、Excel、CSV
           </p>
+          {readingFiles && <p className="faint">正在读取文件...</p>}
           {files.length > 0 && (
-            <ul style={{ marginTop: '0.8rem', color: 'var(--paper-mute)' }}>
-              {files.map((f, i) => (
-                <li key={`${f.filename}-${i}`}>{f.filename} · {Math.round(f.content.length / 1000)}k 字符</li>
+            <ul style={{ marginTop: '0.8rem', color: 'var(--paper-mute)', paddingLeft: 0, listStyle: 'none' }}>
+              {files.map((file, i) => (
+                <li
+                  key={`${file.filename}-${i}`}
+                  style={{ borderBottom: '1px solid var(--rule)', padding: '0.65rem 0', display: 'flex', justifyContent: 'space-between', gap: '1rem' }}
+                >
+                  <span>
+                    <strong style={{ color: 'var(--paper)' }}>{file.filename}</strong>
+                    <span className="byline faint" style={{ marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+                      {file.kind.toUpperCase()} · {formatBytes(file.size)}
+                    </span>
+                  </span>
+                  <button type="button" className="ghost" onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))}>
+                    删除
+                  </button>
+                </li>
               ))}
             </ul>
           )}
@@ -173,7 +298,9 @@ export default function NewMeeting() {
                 onChange={e => setAgenda(prev => prev.map((x, idx) => idx === i ? e.target.value : x))}
                 placeholder={`议程 ${i + 1}`}
               />
-              <button type="button" className="ghost" onClick={() => setAgenda(prev => prev.filter((_, idx) => idx !== i))}>删除</button>
+              <button type="button" className="ghost" onClick={() => setAgenda(prev => prev.filter((_, idx) => idx !== i))}>
+                删除
+              </button>
             </div>
           ))}
           <button type="button" className="ghost" onClick={() => setAgenda(prev => [...prev, ''])}>添加议程</button>
@@ -191,10 +318,10 @@ export default function NewMeeting() {
           <label>入会模型与最高模型确认</label>
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.8rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
             <button type="button" className="ghost" onClick={openMeetingTabs} disabled={openingTabs}>
-              {openingTabs ? '正在打开…' : '打开/聚焦三家网页'}
+              {openingTabs ? '正在打开...' : '打开/聚焦三家网页'}
             </button>
             <span className="byline faint" style={{ textTransform: 'none', letterSpacing: 0 }}>
-              打开后请在受控浏览器里登录，并手动切到最高模型。
+              登录后请确认模型档位
             </span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
@@ -232,7 +359,7 @@ export default function NewMeeting() {
 
         {error && <p style={{ color: 'var(--vermilion)', marginBottom: '1rem' }}>{error}</p>}
         <button type="submit" className="primary" disabled={!canSubmit || submitting}>
-          {submitting ? '正在开会…' : '开始会议'}
+          {submitting ? '正在开会...' : '开始会议'}
         </button>
       </form>
     </div>
