@@ -2,8 +2,9 @@ import { CDPSession } from '../browser/cdp.js'
 import { ADAPTER_REGISTRY, DEFAULT_MEETING_MODEL_CONFIGS, MeetingModelConfigs, MeetingModelName } from '../browser/adapters/index.js'
 import type { ModelConfig, SiteAdapter } from '../browser/adapters/base.js'
 import {
-  agendaItems, meetingArtifacts, meetingFiles, meetingMessages, meetings,
+  agendaItems, meetingArtifacts, meetingFiles, meetingLogs, meetingMessages, meetings,
   type AgendaItemRow, type MeetingMode,
+  type MeetingFileRow,
 } from '../storage/repository.js'
 import { agendaPrompt, agendaSummaryPrompt, finalSummaryPrompt, type MeetingContext } from './prompts.js'
 import { archiveMeeting } from './archive.js'
@@ -17,6 +18,8 @@ export type MeetingEvent =
   | { type: 'turn_started'; meetingId: string; agendaId?: number | null; turnIndex: number; role: string; model: MeetingModelName }
   | { type: 'delta'; meetingId: string; agendaId?: number | null; turnIndex: number; role: string; model: MeetingModelName; content: string }
   | { type: 'message_complete'; meetingId: string; agendaId?: number | null; turnIndex: number; role: string; model: MeetingModelName; content: string }
+  | { type: 'model_status'; meetingId: string; model: MeetingModelName; status: 'opening' | 'ready' | 'speaking' | 'complete' | 'skipped' | 'error'; detail?: string }
+  | { type: 'file_delivery'; meetingId: string; model: MeetingModelName; filename?: string; status: 'trying' | 'uploaded' | 'fallback' | 'error'; method?: FileDeliveryMode; attempt?: number; detail?: string }
   | { type: 'agenda_summary'; meetingId: string; agendaId: number; agendaIndex: number; content: string }
   | { type: 'final_summary'; meetingId: string; content: string; archiveDir?: string; summaryPath?: string; jsonPath?: string }
   | { type: 'done'; meetingId: string }
@@ -28,7 +31,9 @@ const APP_ORIGIN = process.env.APP_ORIGIN ?? 'http://localhost:5173'
 type FileDeliveryMode = 'original-upload' | 'text-fallback'
 
 interface AdapterBundle {
-  adapters: Record<MeetingModelName, SiteAdapter>
+  adapters: Partial<Record<MeetingModelName, SiteAdapter>>
+  activeParticipants: MeetingModelName[]
+  moderator: MeetingModelName
   fileDelivery: Partial<Record<MeetingModelName, FileDeliveryMode>>
 }
 
@@ -41,6 +46,44 @@ export interface CreateMeetingInput {
   agenda: string[]
   files: UploadedMeetingFile[]
   modelConfigs?: Partial<MeetingModelConfigs>
+}
+
+function recordModelStatus(
+  meetingId: string,
+  model: MeetingModelName,
+  status: 'opening' | 'ready' | 'speaking' | 'complete' | 'skipped' | 'error',
+  emit: Emit,
+  detail = '',
+): void {
+  meetingLogs.insert({ meetingId, kind: 'model_status', model, status, detail })
+  emit({ type: 'model_status', meetingId, model, status, detail })
+}
+
+function recordFileDelivery(
+  meetingId: string,
+  model: MeetingModelName,
+  status: 'trying' | 'uploaded' | 'fallback' | 'error',
+  emit: Emit,
+  args: { filename?: string; method?: FileDeliveryMode; attempt?: number; detail?: string } = {},
+): void {
+  meetingLogs.insert({
+    meetingId,
+    kind: 'file_delivery',
+    model,
+    filename: args.filename ?? null,
+    status,
+    detail: args.detail ?? '',
+  })
+  emit({
+    type: 'file_delivery',
+    meetingId,
+    model,
+    status,
+    filename: args.filename,
+    method: args.method,
+    attempt: args.attempt,
+    detail: args.detail,
+  })
 }
 
 async function runModelTurn(args: {
@@ -57,6 +100,7 @@ async function runModelTurn(args: {
   emit({ type: 'turn_started', meetingId, agendaId, turnIndex, role, model })
   console.log(`[meeting ${meetingId}] turn ${turnIndex} start: ${role}/${model}`)
   try {
+    recordModelStatus(meetingId, model, 'speaking', emit, role)
     await adapter.focus?.()
     await adapter.sendMessage(prompt)
     const content = await adapter.streamResponse(delta => {
@@ -65,6 +109,7 @@ async function runModelTurn(args: {
     meetingMessages.insert({ meetingId, agendaId, turnIndex, role, model, content })
     emit({ type: 'message_complete', meetingId, agendaId, turnIndex, role, model, content })
     if (!content.trim()) throw new Error(`${model} returned empty content`)
+    recordModelStatus(meetingId, model, 'complete', emit, role)
     console.log(`[meeting ${meetingId}] turn ${turnIndex} complete: ${role}/${model}, ${content.length} chars`)
     return content
   } catch (err) {
@@ -72,6 +117,7 @@ async function runModelTurn(args: {
     const content = `[ERROR: ${error}]`
     meetingMessages.insert({ meetingId, agendaId, turnIndex, role, model, content })
     emit({ type: 'error', meetingId, agendaId, model, error })
+    recordModelStatus(meetingId, model, 'error', emit, `${role}: ${error}`)
     console.error(`[meeting ${meetingId}] turn ${turnIndex} error: ${role}/${model}: ${error}`)
     throw err
   }
@@ -81,52 +127,100 @@ async function prepareAdapters(
   meetingId: string,
   cdp: CDPSession,
   participants: MeetingModelName[],
+  moderator: MeetingModelName,
   configs: MeetingModelConfigs,
-  originalFilePaths: string[],
+  files: MeetingFileRow[],
+  emit: Emit,
 ): Promise<AdapterBundle> {
-  const adapters = {} as Record<MeetingModelName, SiteAdapter>
+  const adapters: Partial<Record<MeetingModelName, SiteAdapter>> = {}
+  const activeParticipants: MeetingModelName[] = []
   const fileDelivery: Partial<Record<MeetingModelName, FileDeliveryMode>> = {}
   for (const model of participants) {
-    const page = await cdp.ensurePage(model)
-    const adapter = ADAPTER_REGISTRY[model].ctor()
-    adapter.setPage(page)
-    await adapter.ensureReady()
-    await adapter.newConversation()
-    if (adapter.configure) await adapter.configure(configs[model] as ModelConfig)
-    fileDelivery[model] = await uploadOriginalFiles(meetingId, model, adapter, originalFilePaths)
-      ? 'original-upload'
-      : 'text-fallback'
-    adapters[model] = adapter
+    recordModelStatus(meetingId, model, 'opening', emit, 'opening controlled browser tab')
+    try {
+      const page = await cdp.ensurePage(model)
+      const adapter = ADAPTER_REGISTRY[model].ctor()
+      adapter.setPage(page)
+      await adapter.ensureReady()
+      await adapter.newConversation()
+      if (adapter.configure) await adapter.configure(configs[model] as ModelConfig)
+      fileDelivery[model] = await uploadOriginalFiles(meetingId, model, adapter, files, emit)
+        ? 'original-upload'
+        : 'text-fallback'
+      adapters[model] = adapter
+      activeParticipants.push(model)
+      recordModelStatus(meetingId, model, 'ready', emit, 'ready for meeting')
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      recordModelStatus(meetingId, model, 'skipped', emit, detail)
+      console.warn(`[meeting ${meetingId}] skipping ${model}: ${detail}`)
+    }
   }
-  return { adapters, fileDelivery }
+
+  if (activeParticipants.length < 2) {
+    throw new Error(`At least two models must be ready. Ready models: ${activeParticipants.join(', ') || 'none'}`)
+  }
+
+  const activeModerator = activeParticipants.includes(moderator) ? moderator : activeParticipants[0]
+  if (activeModerator !== moderator) {
+    recordModelStatus(meetingId, moderator, 'skipped', emit, `moderator unavailable; switched to ${activeModerator}`)
+  }
+
+  return { adapters, activeParticipants, moderator: activeModerator, fileDelivery }
 }
 
 async function uploadOriginalFiles(
   meetingId: string,
   model: MeetingModelName,
   adapter: SiteAdapter,
-  originalFilePaths: string[],
+  files: MeetingFileRow[],
+  emit: Emit,
 ): Promise<boolean> {
+  const originalFilePaths = files.map(f => f.original_path).filter(Boolean)
   if (!originalFilePaths.length) return false
   if (!adapter.uploadFiles) {
     console.warn(`[meeting ${meetingId}] ${model} has no file upload hook; using text fallback`)
+    for (const file of files) {
+      recordFileDelivery(meetingId, model, 'fallback', emit, {
+        filename: file.filename,
+        method: 'text-fallback',
+        detail: 'adapter has no file upload hook',
+      })
+    }
     return false
   }
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
+      recordFileDelivery(meetingId, model, 'trying', emit, { attempt, detail: 'uploading original files' })
       await adapter.focus?.()
       const ok = await adapter.uploadFiles(originalFilePaths)
       if (ok) {
+        for (const file of files) {
+          recordFileDelivery(meetingId, model, 'uploaded', emit, {
+            filename: file.filename,
+            method: 'original-upload',
+            attempt,
+          })
+        }
         console.log(`[meeting ${meetingId}] uploaded original files to ${model} on attempt ${attempt}`)
         return true
       }
     } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      recordFileDelivery(meetingId, model, 'error', emit, { attempt, detail })
       console.warn(`[meeting ${meetingId}] original file upload failed for ${model} on attempt ${attempt}:`, err)
     }
     await new Promise(r => setTimeout(r, 1000))
   }
 
+  for (const file of files) {
+    recordFileDelivery(meetingId, model, 'fallback', emit, {
+      filename: file.filename,
+      method: 'text-fallback',
+      detail: 'original upload failed after two attempts',
+    })
+  }
   console.warn(`[meeting ${meetingId}] original file upload unavailable for ${model}; using text fallback`)
   return false
 }
@@ -152,16 +246,24 @@ export async function runMeeting(
     gemini: input.modelConfigs?.gemini ?? DEFAULT_MEETING_MODEL_CONFIGS.gemini,
   }
 
+  const { adapters, activeParticipants, moderator, fileDelivery } = await prepareAdapters(
+    meetingId,
+    cdp,
+    input.participants,
+    input.moderator,
+    configs,
+    storedFiles,
+    emit,
+  )
+
   const baseCtx: Omit<MeetingContext, 'files'> = {
     title: input.title,
     goal: input.goal,
     mode: input.mode,
-    participants: input.participants,
-    moderator: input.moderator,
+    participants: activeParticipants,
+    moderator,
   }
 
-  const originalFilePaths = storedFiles.map(f => f.original_path).filter(Boolean)
-  const { adapters, fileDelivery } = await prepareAdapters(meetingId, cdp, input.participants, configs, originalFilePaths)
   const ctxFor = (model: MeetingModelName): MeetingContext => ({
     ...baseCtx,
     files: fileDelivery[model] === 'original-upload'
@@ -172,7 +274,84 @@ export async function runMeeting(
       : storedFiles.map(f => ({ filename: f.filename, content: f.content })),
   })
   const agendaSummaries: { question: string; summary: string }[] = []
+  const failedModels = new Set<MeetingModelName>()
   let turnIndex = 0
+
+  const runnableParticipants = () => activeParticipants.filter(model => !failedModels.has(model) && adapters[model])
+
+  const runParticipantTurn = async (args: {
+    agendaId: number
+    agendaIndex: number
+    question: string
+    model: MeetingModelName
+    previousTurns: { model: MeetingModelName; content: string }[]
+  }): Promise<{ model: MeetingModelName; content: string } | null> => {
+    const adapter = adapters[args.model]
+    if (!adapter) return null
+    try {
+      const content = await runModelTurn({
+        meetingId,
+        agendaId: args.agendaId,
+        turnIndex: turnIndex++,
+        role: 'participant',
+        model: args.model,
+        adapter,
+        prompt: agendaPrompt({
+          ctx: ctxFor(args.model),
+          agendaIndex: args.agendaIndex,
+          question: args.question,
+          model: args.model,
+          previousTurns: args.previousTurns,
+        }),
+        emit,
+      })
+      return { model: args.model, content }
+    } catch {
+      failedModels.add(args.model)
+      return null
+    }
+  }
+
+  const runSummaryTurn = async (args: {
+    agendaId: number | null
+    agendaIndex?: number
+    question?: string
+    turns?: { model: MeetingModelName; content: string }[]
+    agendaSummaries?: { question: string; summary: string }[]
+    role: 'agenda_summary' | 'final_summary'
+  }): Promise<{ model: MeetingModelName; content: string }> => {
+    const candidates = [moderator, ...activeParticipants.filter(model => model !== moderator)]
+      .filter(model => !failedModels.has(model) && adapters[model])
+
+    for (const model of candidates) {
+      const adapter = adapters[model]
+      if (!adapter) continue
+      try {
+        const content = await runModelTurn({
+          meetingId,
+          agendaId: args.agendaId,
+          turnIndex: turnIndex++,
+          role: args.role,
+          model,
+          adapter,
+          prompt: args.role === 'agenda_summary'
+            ? agendaSummaryPrompt({
+                ctx: ctxFor(model),
+                agendaIndex: args.agendaIndex ?? 0,
+                question: args.question ?? '',
+                turns: args.turns ?? [],
+              })
+            : finalSummaryPrompt({ ctx: ctxFor(model), agendaSummaries: args.agendaSummaries ?? [] }),
+          emit,
+        })
+        return { model, content }
+      } catch {
+        failedModels.add(model)
+      }
+    }
+
+    throw new Error('No available moderator model can summarize the meeting')
+  }
 
   for (let agendaIndex = 0; agendaIndex < storedAgenda.length; agendaIndex++) {
     const item: AgendaItemRow = storedAgenda[agendaIndex]
@@ -180,60 +359,41 @@ export async function runMeeting(
     const turns: { model: MeetingModelName; content: string }[] = []
 
     if (input.mode === 'parallel') {
-      const results = await Promise.all(input.participants.map(async model => {
-        const content = await runModelTurn({
-          meetingId,
-          agendaId: item.id,
-          turnIndex: turnIndex++,
-          role: 'participant',
-          model,
-          adapter: adapters[model],
-          prompt: agendaPrompt({ ctx: ctxFor(model), agendaIndex, question: item.question, model, previousTurns: [] }),
-          emit,
-        })
-        return { model, content }
-      }))
-      turns.push(...results)
+      const results = await Promise.all(runnableParticipants().map(model =>
+        runParticipantTurn({ agendaId: item.id, agendaIndex, question: item.question, model, previousTurns: [] })
+      ))
+      turns.push(...results.filter((result): result is { model: MeetingModelName; content: string } => !!result))
     } else {
-      for (const model of input.participants) {
-        const content = await runModelTurn({
-          meetingId,
+      for (const model of runnableParticipants()) {
+        const result = await runParticipantTurn({
           agendaId: item.id,
-          turnIndex: turnIndex++,
-          role: 'participant',
+          agendaIndex,
+          question: item.question,
           model,
-          adapter: adapters[model],
-          prompt: agendaPrompt({ ctx: ctxFor(model), agendaIndex, question: item.question, model, previousTurns: turns }),
-          emit,
+          previousTurns: turns,
         })
-        turns.push({ model, content })
+        if (result) turns.push(result)
       }
     }
 
-    const summary = await runModelTurn({
-      meetingId,
+    if (!turns.length) throw new Error(`No model produced a usable answer for agenda ${agendaIndex + 1}`)
+
+    const { content: summary } = await runSummaryTurn({
       agendaId: item.id,
-      turnIndex: turnIndex++,
+      agendaIndex,
+      question: item.question,
+      turns,
       role: 'agenda_summary',
-      model: input.moderator,
-      adapter: adapters[input.moderator],
-      prompt: agendaSummaryPrompt({ ctx: ctxFor(input.moderator), agendaIndex, question: item.question, turns }),
-      emit,
     })
     agendaItems.updateSummary(item.id, summary)
     agendaSummaries.push({ question: item.question, summary })
     emit({ type: 'agenda_summary', meetingId, agendaId: item.id, agendaIndex, content: summary })
   }
 
-  const finalSummary = await runModelTurn({
-    meetingId,
+  const { content: finalSummary } = await runSummaryTurn({
     agendaId: null,
-    turnIndex: turnIndex++,
     role: 'final_summary',
-    model: input.moderator,
-    adapter: adapters[input.moderator],
-    prompt: finalSummaryPrompt({ ctx: ctxFor(input.moderator), agendaSummaries }),
-    emit,
+    agendaSummaries,
   })
 
   const freshMeeting = meetings.get(meetingId)!

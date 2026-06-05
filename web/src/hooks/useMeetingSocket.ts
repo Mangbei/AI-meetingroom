@@ -10,6 +10,16 @@ export interface MeetingMessageStream {
   complete: boolean
 }
 
+export interface MeetingLogEntry {
+  id?: number
+  kind: 'model_status' | 'file_delivery' | string
+  model?: MeetingModelName | null
+  filename?: string | null
+  status: string
+  detail?: string
+  created_at?: number
+}
+
 export interface MeetingLiveState {
   currentAgendaId: number | null
   streams: MeetingMessageStream[]
@@ -18,12 +28,13 @@ export interface MeetingLiveState {
   archiveDir: string
   summaryPath: string
   jsonPath: string
+  logs: MeetingLogEntry[]
   done: boolean
   error: string | null
 }
 
 interface MeetingEvent {
-  type: 'agenda_started' | 'turn_started' | 'delta' | 'message_complete' | 'agenda_summary' | 'final_summary' | 'done' | 'error'
+  type: 'agenda_started' | 'turn_started' | 'delta' | 'message_complete' | 'model_status' | 'file_delivery' | 'agenda_summary' | 'final_summary' | 'done' | 'error'
   meetingId: string
   agendaId?: number | null
   turnIndex?: number
@@ -31,6 +42,9 @@ interface MeetingEvent {
   model?: MeetingModelName
   content?: string
   error?: string
+  filename?: string
+  status?: string
+  detail?: string
   archiveDir?: string
   summaryPath?: string
   jsonPath?: string
@@ -44,6 +58,7 @@ const INITIAL: MeetingLiveState = {
   archiveDir: '',
   summaryPath: '',
   jsonPath: '',
+  logs: [],
   done: false,
   error: null,
 }
@@ -103,6 +118,19 @@ function applyEvent(prev: MeetingLiveState, ev: MeetingEvent): MeetingLiveState 
   }
   if (ev.type === 'agenda_summary' && ev.agendaId != null) {
     return { ...prev, agendaSummaries: { ...prev.agendaSummaries, [ev.agendaId]: ev.content ?? '' } }
+  }
+  if (ev.type === 'model_status' || ev.type === 'file_delivery') {
+    return {
+      ...prev,
+      logs: [...prev.logs, {
+        kind: ev.type,
+        model: ev.model ?? null,
+        filename: ev.filename ?? null,
+        status: ev.status ?? '',
+        detail: ev.detail ?? '',
+        created_at: Date.now(),
+      }],
+    }
   }
   if (ev.type === 'final_summary') {
     return {

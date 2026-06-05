@@ -5,7 +5,12 @@ import { ADAPTER_REGISTRY, MEETING_MODELS } from '../browser/adapters/index.js'
 import type { MeetingModelName } from '../browser/adapters/index.js'
 import type { RuntimeStatus } from '../browser/adapters/base.js'
 import {
-  agendaItems, meetingArtifacts, meetingFiles, meetingMessages, meetings,
+  agendaItems,
+  meetingArtifacts,
+  meetingFiles,
+  meetingLogs,
+  meetingMessages,
+  meetings,
 } from '../storage/repository.js'
 import { runMeeting, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
 import { renderMeetingMarkdown } from '../meeting/archive.js'
@@ -31,6 +36,15 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
         resolve(fallback)
       })
   })
+}
+
+function pickModels(value: unknown): MeetingModelName[] {
+  if (!Array.isArray(value)) return [...MEETING_MODELS]
+  const seen = new Set<MeetingModelName>()
+  for (const raw of value) {
+    if (MEETING_MODELS.includes(raw as MeetingModelName)) seen.add(raw as MeetingModelName)
+  }
+  return [...seen]
 }
 
 function defaultRuntimeStatus(model: MeetingModelName, loggedIn: boolean, warning?: string): RuntimeStatus {
@@ -59,15 +73,14 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
       const title = (body.title ?? '').trim()
       const goal = (body.goal ?? '').trim()
       const mode = body.mode === 'parallel' ? 'parallel' : 'relay'
-      const participants = (body.participants ?? []).filter((m): m is MeetingModelName =>
-        MEETING_MODELS.includes(m as MeetingModelName))
+      const participants = pickModels(body.participants)
       const moderator = body.moderator as MeetingModelName | undefined
       const agenda = (body.agenda ?? []).map(q => q.trim()).filter(Boolean)
       const files = (body.files ?? []) as UploadedMeetingFile[]
 
       if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
-      if (participants.length !== 3) {
-        return res.status(400).json({ error: '首版请同时选择 ChatGPT、Gemini、DeepSeek 三位参会者' })
+      if (participants.length < 2 || participants.length > 5) {
+        return res.status(400).json({ error: '请选择 2 到 5 位参会模型；当前已接入 ChatGPT、Gemini、DeepSeek' })
       }
       if (!moderator || !participants.includes(moderator)) {
         return res.status(400).json({ error: '主持人必须是参会模型之一' })
@@ -138,6 +151,7 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
       files: meetingFiles.listByMeeting(req.params.id).map(f => ({ ...f, content: undefined })),
       agenda: agendaItems.listByMeeting(req.params.id),
       messages: meetingMessages.listByMeeting(req.params.id),
+      logs: meetingLogs.listByMeeting(req.params.id),
       artifact: meetingArtifacts.get(req.params.id),
     })
   })
@@ -186,9 +200,10 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     }
   })
 
-  router.post('/browser/open-meeting-tabs', async (_req, res) => {
+  router.post('/browser/open-meeting-tabs', async (req, res) => {
     try {
-      const opened = await cdp.openSites([...MEETING_MODELS])
+      const requested = pickModels(req.body?.models)
+      const opened = await cdp.openSites(requested.length ? requested : [...MEETING_MODELS])
       res.json({ ok: true, opened })
     } catch (err) {
       res.status(500).json({ error: String(err) })
@@ -205,9 +220,12 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     }
   })
 
-  router.get('/status', async (_req, res) => {
+  router.get('/status', async (req, res) => {
     try {
-      const entries = await Promise.all(MEETING_MODELS.map(async model => {
+      const models = typeof req.query.models === 'string'
+        ? pickModels(String(req.query.models).split(','))
+        : [...MEETING_MODELS]
+      const entries = await Promise.all(models.map(async model => {
         const basicLoggedIn = await withTimeout(cdp.checkLoginStatus(model), 6_000, false)
         const fallback = defaultRuntimeStatus(
           model,

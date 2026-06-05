@@ -57,6 +57,17 @@ export interface MeetingArtifactRow {
   created_at: number
 }
 
+export interface MeetingLogRow {
+  id: number
+  meeting_id: string
+  kind: string
+  model: MeetingModelName | null
+  filename: string | null
+  status: string
+  detail: string
+  created_at: number
+}
+
 export const meetings = {
   create(args: {
     id: string
@@ -169,5 +180,26 @@ export const meetingArtifacts = {
 
   get(meetingId: string): MeetingArtifactRow | undefined {
     return db.prepare('SELECT * FROM meeting_artifacts WHERE meeting_id = ?').get(meetingId) as MeetingArtifactRow | undefined
+  },
+}
+
+export const meetingLogs = {
+  insert(args: {
+    meetingId: string
+    kind: string
+    status: string
+    model?: MeetingModelName | null
+    filename?: string | null
+    detail?: string
+  }): void {
+    db.prepare(
+      'INSERT INTO meeting_logs (meeting_id, kind, model, filename, status, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(args.meetingId, args.kind, args.model ?? null, args.filename ?? null, args.status, args.detail ?? '', Date.now())
+  },
+
+  listByMeeting(meetingId: string): MeetingLogRow[] {
+    return db.prepare(
+      'SELECT * FROM meeting_logs WHERE meeting_id = ? ORDER BY id'
+    ).all(meetingId) as MeetingLogRow[]
   },
 }

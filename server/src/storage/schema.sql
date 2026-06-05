@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS meeting_artifacts (
   FOREIGN KEY (meeting_id) REFERENCES meetings(id)
 );
 
+CREATE TABLE IF NOT EXISTS meeting_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  model TEXT,
+  filename TEXT,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_meeting_files_meeting ON meeting_files(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_agenda_items_meeting ON agenda_items(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_meeting_messages_meeting ON meeting_messages(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_meeting_logs_meeting ON meeting_logs(meeting_id);

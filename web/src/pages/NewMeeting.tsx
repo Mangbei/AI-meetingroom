@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { MEETING_MODELS, MODEL_META, type MeetingModelName } from '../lib/models.ts'
+import {
+  MEETING_MODELS,
+  MODEL_CANDIDATE_ORDER,
+  MODEL_CANDIDATES,
+  MODEL_META,
+  type MeetingModelName,
+  type ModelCandidateName,
+} from '../lib/models.ts'
 
 type MeetingMode = 'relay' | 'parallel'
 type FileKind = 'txt' | 'md' | 'pdf' | 'docx' | 'doc' | 'xlsx' | 'xls' | 'csv'
@@ -21,12 +28,6 @@ interface RuntimeStatus {
   configured: boolean
   needsManualConfirmation: boolean
   warning?: string
-}
-
-const TARGET_MODEL: Record<MeetingModelName, string> = {
-  chatgpt: '最高 Thinking / Reasoning 模型',
-  gemini: 'Gemini Pro / 最高 Pro 模型',
-  deepseek: 'DeepSeek R1 + 深度思考',
 }
 
 const KIND_BY_EXT: Record<string, FileKind> = {
@@ -63,6 +64,10 @@ const FILE_ACCEPT = [
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024
 const MAX_TOTAL_BYTES = 55 * 1024 * 1024
+
+function isMeetingModel(model: ModelCandidateName): model is MeetingModelName {
+  return MEETING_MODELS.includes(model as MeetingModelName)
+}
 
 function kindFromName(filename: string): FileKind | undefined {
   const ext = filename.split('.').pop()?.toLowerCase()
@@ -101,7 +106,7 @@ export default function NewMeeting() {
   const [title, setTitle] = useState('文章选题会议')
   const [goal, setGoal] = useState('')
   const [mode, setMode] = useState<MeetingMode>('relay')
-  const [participants] = useState<MeetingModelName[]>([...MEETING_MODELS])
+  const [participants, setParticipants] = useState<MeetingModelName[]>([...MEETING_MODELS])
   const [moderator, setModerator] = useState<MeetingModelName>('chatgpt')
   const [agenda, setAgenda] = useState<string[]>([''])
   const [files, setFiles] = useState<UploadFile[]>([])
@@ -113,20 +118,55 @@ export default function NewMeeting() {
   const [runtimeStatus, setRuntimeStatus] = useState<Partial<Record<MeetingModelName, RuntimeStatus>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [openingTabs, setOpeningTabs] = useState(false)
+  const [checkingStatus, setCheckingStatus] = useState(false)
   const [readingFiles, setReadingFiles] = useState(false)
   const [error, setError] = useState('')
 
+  const refreshStatus = async (models = participants) => {
+    setCheckingStatus(true)
+    try {
+      const query = encodeURIComponent(models.join(','))
+      const status = await fetch(`/api/status?models=${query}`).then(r => r.json())
+      setRuntimeStatus(prev => ({ ...prev, ...(status.runtimeStatus ?? {}) }))
+    } catch {
+      setRuntimeStatus(prev => ({ ...prev }))
+    } finally {
+      setCheckingStatus(false)
+    }
+  }
+
   useEffect(() => {
-    fetch('/api/status')
-      .then(r => r.json())
-      .then(d => setRuntimeStatus(d.runtimeStatus ?? {}))
-      .catch(() => setRuntimeStatus({}))
+    void refreshStatus(MEETING_MODELS)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!participants.includes(moderator)) setModerator(participants[0] ?? 'chatgpt')
+  }, [moderator, participants])
 
   const canSubmit = useMemo(() => {
     return title.trim() && goal.trim() && agenda.some(q => q.trim()) &&
+      participants.length >= 2 && participants.length <= 5 &&
       participants.every(m => confirmations[m]) && !readingFiles
   }, [agenda, confirmations, goal, participants, readingFiles, title])
+
+  const toggleParticipant = (model: MeetingModelName) => {
+    setError('')
+    setParticipants(prev => {
+      if (prev.includes(model)) {
+        if (prev.length <= 2) {
+          setError('至少需要 2 位模型入会')
+          return prev
+        }
+        return prev.filter(item => item !== model)
+      }
+      if (prev.length >= 5) {
+        setError('最多选择 5 位模型')
+        return prev
+      }
+      return [...prev, model]
+    })
+  }
 
   const readFiles = async (list: FileList | null) => {
     if (!list) return
@@ -177,11 +217,14 @@ export default function NewMeeting() {
     setOpeningTabs(true)
     setError('')
     try {
-      const res = await fetch('/api/browser/open-meeting-tabs', { method: 'POST' })
+      const res = await fetch('/api/browser/open-meeting-tabs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ models: participants }),
+      })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? res.statusText)
-      const status = await fetch('/api/status').then(r => r.json())
-      setRuntimeStatus(status.runtimeStatus ?? {})
+      await refreshStatus(participants)
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err))
     } finally {
@@ -192,6 +235,19 @@ export default function NewMeeting() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
+
+    const notReady = participants.filter(model => runtimeStatus[model] && runtimeStatus[model]?.loggedIn === false)
+    if (notReady.length) {
+      const remaining = participants.length - notReady.length
+      const names = notReady.map(model => MODEL_META[model].display).join('、')
+      const ok = window.confirm(
+        remaining >= 2
+          ? `${names} 当前未检测到登录或连通。继续后系统会尝试让它入会，失败则自动缺席。是否继续？`
+          : `${names} 当前未检测到登录或连通。当前可能不足 2 位模型可用，是否仍然尝试开始？`,
+      )
+      if (!ok) return
+    }
+
     setSubmitting(true)
     setError('')
     try {
@@ -226,7 +282,7 @@ export default function NewMeeting() {
   }
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: '3rem 2.4rem 4rem' }}>
+    <div style={{ maxWidth: 1040, margin: '0 auto', padding: '3rem 2.4rem 4rem' }}>
       <header className="fade-up" style={{ borderBottom: '1.5px solid var(--paper)', paddingBottom: '1.4rem', marginBottom: '2.2rem' }}>
         <Link to="/" className="byline" style={{ borderBottom: 'none', color: 'var(--paper-mute)' }}>← 返回广场</Link>
         <h1 className="display" style={{ fontSize: 'clamp(36px, 5vw, 58px)', marginTop: '0.8rem', color: 'var(--paper)' }}>
@@ -263,7 +319,7 @@ export default function NewMeeting() {
             style={{ border: '1px solid var(--rule)', padding: '0.8rem', background: 'var(--ink-2)' }}
           />
           <p className="byline faint" style={{ marginTop: '0.6rem', textTransform: 'none', letterSpacing: 0 }}>
-            TXT、MD、PDF、Word、Excel、CSV
+            TXT、MD、PDF、Word、Excel、CSV；原文件优先直传，失败后文本兜底。
           </p>
           {readingFiles && <p className="faint">正在读取文件...</p>}
           {files.length > 0 && (
@@ -315,40 +371,70 @@ export default function NewMeeting() {
         </section>
 
         <section style={{ margin: '2rem 0', paddingTop: '1.2rem', borderTop: '1px solid var(--rule)' }}>
-          <label>入会模型与最高模型确认</label>
+          <label>入会模型与运行前检查</label>
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.8rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
-            <button type="button" className="ghost" onClick={openMeetingTabs} disabled={openingTabs}>
-              {openingTabs ? '正在打开...' : '打开/聚焦三家网页'}
+            <button type="button" className="ghost" onClick={openMeetingTabs} disabled={openingTabs || participants.length < 2}>
+              {openingTabs ? '正在打开...' : '打开/聚焦所选网页'}
+            </button>
+            <button type="button" className="ghost" onClick={() => void refreshStatus(participants)} disabled={checkingStatus}>
+              {checkingStatus ? '检查中...' : '刷新连通性'}
             </button>
             <span className="byline faint" style={{ textTransform: 'none', letterSpacing: 0 }}>
-              登录后请确认模型档位
+              选择 2-5 位；当前已接入 3 位，其他模型显示为规划中。
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-            {participants.map(model => {
-              const meta = MODEL_META[model]
-              const status = runtimeStatus[model]
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
+            {MODEL_CANDIDATE_ORDER.map(candidate => {
+              const meta = MODEL_CANDIDATES[candidate]
+              const enabled = meta.enabled && isMeetingModel(candidate)
+              const selected = enabled && participants.includes(candidate)
+              const status = enabled ? runtimeStatus[candidate] : undefined
               return (
-                <div key={model} style={{ borderLeft: `2px solid ${meta.tone}`, paddingLeft: '1rem' }}>
-                  <h3 className="display" style={{ fontSize: 22, color: meta.tone }}>{meta.display}</h3>
-                  <p className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>{TARGET_MODEL[model]}</p>
-                  <p style={{ color: status?.loggedIn ? 'var(--paper-mute)' : 'var(--vermilion)', fontStyle: 'italic', fontSize: 14 }}>
-                    {status?.loggedIn ? '已检测到登录或需人工确认' : '未确认登录，请先在浏览器登录'}
-                  </p>
-                  {status?.warning && <p className="faint" style={{ fontSize: 13 }}>{status.warning}</p>}
-                  <label style={{ marginTop: '0.8rem', letterSpacing: 0, textTransform: 'none', fontFamily: 'var(--serif-body)', fontSize: 14 }}>
+                <div
+                  key={candidate}
+                  style={{
+                    borderLeft: `2px solid ${meta.tone}`,
+                    paddingLeft: '1rem',
+                    opacity: enabled ? 1 : 0.52,
+                  }}
+                >
+                  <label style={{ letterSpacing: 0, textTransform: 'none', fontFamily: 'var(--serif-body)', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input
                       type="checkbox"
-                      checked={confirmations[model]}
-                      onChange={e => setConfirmations(prev => ({ ...prev, [model]: e.target.checked }))}
-                      style={{ width: 14, marginRight: 8 }}
+                      disabled={!enabled}
+                      checked={selected}
+                      onChange={() => enabled && toggleParticipant(candidate)}
+                      style={{ width: 14 }}
                     />
-                    我已确认该网页使用最高可用模型
+                    <h3 className="display" style={{ fontSize: 22, color: meta.tone, margin: 0 }}>{meta.display}</h3>
                   </label>
+                  <p className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>{meta.targetModel}</p>
+                  <p className="faint" style={{ fontSize: 13 }}>{meta.role}</p>
+                  <p style={{ color: status?.loggedIn ? 'var(--paper-mute)' : 'var(--vermilion)', fontStyle: 'italic', fontSize: 14 }}>
+                    {!enabled
+                      ? '规划中，等待适配器'
+                      : status?.loggedIn
+                        ? '已检测到登录或需人工确认'
+                        : '未确认登录，可继续尝试但可能缺席'}
+                  </p>
+                  {enabled && selected && (
+                    <label style={{ marginTop: '0.8rem', letterSpacing: 0, textTransform: 'none', fontFamily: 'var(--serif-body)', fontSize: 14 }}>
+                      <input
+                        type="checkbox"
+                        checked={confirmations[candidate]}
+                        onChange={e => setConfirmations(prev => ({ ...prev, [candidate]: e.target.checked }))}
+                        style={{ width: 14, marginRight: 8 }}
+                      />
+                      我已确认该网页使用最高可用模型
+                    </label>
+                  )}
+                  {status?.warning && <p className="faint" style={{ fontSize: 13 }}>{status.warning}</p>}
                 </div>
               )
             })}
           </div>
+
           <div className="field" style={{ marginTop: '1.4rem' }}>
             <label>主持人 / 最终归纳者</label>
             <select value={moderator} onChange={e => setModerator(e.target.value as MeetingModelName)}>
