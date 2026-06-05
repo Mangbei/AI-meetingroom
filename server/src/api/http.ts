@@ -14,6 +14,7 @@ import {
 } from '../storage/repository.js'
 import { runMeeting, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
 import { renderMeetingMarkdown } from '../meeting/archive.js'
+import type { ModelPosture, ModelPostures } from '../meeting/prompts.js'
 import {
   ACCEPTED_FILE_EXTENSIONS,
   kindFromFilename,
@@ -22,6 +23,7 @@ import {
 } from '../meeting/files.js'
 
 type WsClients = Map<string, Set<(event: MeetingEvent) => void>>
+const MODEL_POSTURES = new Set<ModelPosture>(['cooperative', 'balanced', 'critical'])
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
@@ -45,6 +47,23 @@ function pickModels(value: unknown): MeetingModelName[] {
     if (MEETING_MODELS.includes(raw as MeetingModelName)) seen.add(raw as MeetingModelName)
   }
   return [...seen]
+}
+
+function pickAgendaRounds(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 2
+  return Math.min(5, Math.max(1, Math.floor(parsed)))
+}
+
+function pickModelPostures(value: unknown, participants: MeetingModelName[]): ModelPostures {
+  if (!value || typeof value !== 'object') return {}
+  const input = value as Record<string, unknown>
+  const result: ModelPostures = {}
+  for (const model of participants) {
+    const posture = input[model]
+    if (typeof posture === 'string' && MODEL_POSTURES.has(posture as ModelPosture)) result[model] = posture as ModelPosture
+  }
+  return result
 }
 
 function defaultRuntimeStatus(model: MeetingModelName, loggedIn: boolean, warning?: string): RuntimeStatus {
@@ -74,6 +93,8 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
       const goal = (body.goal ?? '').trim()
       const mode = body.mode === 'parallel' ? 'parallel' : 'relay'
       const participants = pickModels(body.participants)
+      const agendaRounds = pickAgendaRounds(body.agendaRounds)
+      const modelPostures = pickModelPostures(body.modelPostures, participants)
       const moderator = body.moderator as MeetingModelName | undefined
       const agenda = (body.agenda ?? []).map(q => q.trim()).filter(Boolean)
       const files = (body.files ?? []) as UploadedMeetingFile[]
@@ -104,7 +125,7 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
 
       const id = uuid()
       const preparedFiles = await prepareMeetingFiles(id, files)
-      meetings.create({ id, title, goal, mode, participants, moderator })
+      meetings.create({ id, title, goal, mode, agendaRounds, modelPostures, participants, moderator })
       preparedFiles.forEach(file => meetingFiles.insert(id, file.filename, file.kind, file.content, file.originalPath))
       agenda.forEach((question, position) => agendaItems.insert(id, position, question))
 
@@ -114,6 +135,8 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
         title,
         goal,
         mode,
+        agendaRounds,
+        modelPostures,
         participants,
         moderator,
         agenda,

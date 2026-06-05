@@ -10,6 +10,8 @@ interface MeetingRow {
   title: string
   goal: string
   mode: 'relay' | 'parallel'
+  agenda_rounds: number
+  model_postures_json: string
   participants_json: string
   moderator: MeetingModelName
   status: string
@@ -29,6 +31,7 @@ interface AgendaRow {
 interface StoredMessage {
   agenda_id: number | null
   turn_index: number
+  round_index: number
   role: string
   model: MeetingModelName
   content: string
@@ -72,6 +75,7 @@ export default function MeetingView() {
           setStaticStreams((data.messages ?? []).map((m: StoredMessage) => ({
             agendaId: m.agenda_id,
             turnIndex: m.turn_index,
+            roundIndex: m.round_index ?? 0,
             role: m.role,
             model: m.model,
             content: m.content,
@@ -147,7 +151,7 @@ export default function MeetingView() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
           <Link to="/" className="byline" style={{ borderBottom: 'none' }}>← 返回广场</Link>
           <span className="byline" style={{ color: meeting?.status === 'running' ? 'var(--vermilion)' : 'var(--paper-mute)' }}>
-            {meeting?.status ?? 'loading'} · {meeting?.mode === 'parallel' ? '并行' : '接力'}
+            {meeting?.status ?? 'loading'} · {meeting?.mode === 'parallel' ? '并行' : '接力'} · {meeting?.agenda_rounds ?? 1} 轮
           </span>
         </div>
         <h1 className="display" style={{ fontSize: 'clamp(34px, 4vw, 54px)', marginTop: '0.8rem' }}>
@@ -169,21 +173,27 @@ export default function MeetingView() {
 
       {agenda.map(item => {
         const itemStreams = streams.filter(s => s.agendaId === item.id && s.role === 'participant')
+        const roundIndexes = [...new Set(itemStreams.map(s => s.roundIndex ?? 0))].sort((a, b) => a - b)
         const summary = live.agendaSummaries[item.id] || item.summary
         return (
           <section key={item.id} style={{ marginBottom: '2.4rem', borderBottom: '1px solid var(--rule)', paddingBottom: '2rem' }}>
             <div className="byline">议程 {item.position + 1}</div>
             <h2 className="display" style={{ fontSize: 30, margin: '0.4rem 0 1.2rem' }}>{item.question}</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.2rem' }}>
-              {itemStreams.map(stream => (
-                <ModelTurn
-                  key={stream.turnIndex}
-                  stream={stream}
-                  refetching={refetching === `${stream.turnIndex}-${stream.model}`}
-                  onRefetch={() => void refetchMessage(stream)}
-                />
-              ))}
-            </div>
+            {roundIndexes.map(roundIndex => (
+              <div key={roundIndex} style={{ marginTop: '1rem' }}>
+                <div className="byline" style={{ marginBottom: '0.7rem' }}>第 {roundIndex + 1} 轮</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.2rem' }}>
+                  {itemStreams.filter(stream => (stream.roundIndex ?? 0) === roundIndex).map(stream => (
+                    <ModelTurn
+                      key={stream.turnIndex}
+                      stream={stream}
+                      refetching={refetching === `${stream.turnIndex}-${stream.model}`}
+                      onRefetch={() => void refetchMessage(stream)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
             {summary && (
               <div style={{ marginTop: '1.5rem', borderLeft: '2px solid var(--vermilion)', paddingLeft: '1rem' }}>
                 <div className="byline">议程小结</div>

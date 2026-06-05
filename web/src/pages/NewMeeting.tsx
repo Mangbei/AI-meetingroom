@@ -11,6 +11,7 @@ import {
 
 type MeetingMode = 'relay' | 'parallel'
 type FileKind = 'txt' | 'md' | 'pdf' | 'docx' | 'doc' | 'xlsx' | 'xls' | 'csv'
+type ModelPosture = 'cooperative' | 'balanced' | 'critical'
 
 interface UploadFile {
   filename: string
@@ -28,6 +29,12 @@ interface RuntimeStatus {
   configured: boolean
   needsManualConfirmation: boolean
   warning?: string
+}
+
+const POSTURE_META: Record<ModelPosture, { label: string; desc: string }> = {
+  cooperative: { label: '协作', desc: '优先吸收和整合他人观点' },
+  balanced: { label: '默认', desc: '独立判断，不过度附和或反对' },
+  critical: { label: '反骨', desc: '主动质疑漏洞和薄弱假设' },
 }
 
 const KIND_BY_EXT: Record<string, FileKind> = {
@@ -106,10 +113,16 @@ export default function NewMeeting() {
   const [title, setTitle] = useState('文章选题会议')
   const [goal, setGoal] = useState('')
   const [mode, setMode] = useState<MeetingMode>('relay')
+  const [agendaRounds, setAgendaRounds] = useState(2)
   const [participants, setParticipants] = useState<MeetingModelName[]>([...MEETING_MODELS])
   const [moderator, setModerator] = useState<MeetingModelName>('chatgpt')
   const [agenda, setAgenda] = useState<string[]>([''])
   const [files, setFiles] = useState<UploadFile[]>([])
+  const [modelPostures, setModelPostures] = useState<Record<MeetingModelName, ModelPosture>>({
+    chatgpt: 'balanced',
+    gemini: 'balanced',
+    deepseek: 'balanced',
+  })
   const [confirmations, setConfirmations] = useState<Record<MeetingModelName, boolean>>({
     chatgpt: false,
     gemini: false,
@@ -265,10 +278,12 @@ export default function NewMeeting() {
           title: title.trim(),
           goal: goal.trim(),
           mode,
+          agendaRounds,
           participants,
           moderator,
           agenda: agenda.map(q => q.trim()).filter(Boolean),
           files: uploadPayload,
+          modelPostures: Object.fromEntries(participants.map(model => [model, modelPostures[model]])),
           confirmations,
         }),
       })
@@ -363,10 +378,15 @@ export default function NewMeeting() {
         </section>
 
         <section style={{ margin: '2rem 0', paddingTop: '1.2rem', borderTop: '1px solid var(--rule)' }}>
-          <label>讨论模式</label>
-          <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
+          <label>讨论设置</label>
+          <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <button type="button" className={mode === 'relay' ? 'primary' : 'ghost'} onClick={() => setMode('relay')}>接力模式</button>
             <button type="button" className={mode === 'parallel' ? 'primary' : 'ghost'} onClick={() => setMode('parallel')}>并行模式</button>
+            <select value={agendaRounds} onChange={e => setAgendaRounds(Number(e.target.value))} style={{ maxWidth: 220 }}>
+              {[1, 2, 3, 4, 5].map(round => (
+                <option key={round} value={round}>{round} 轮 / 每个议程{round === 2 ? '（推荐）' : ''}</option>
+              ))}
+            </select>
           </div>
         </section>
 
@@ -419,15 +439,31 @@ export default function NewMeeting() {
                         : '未确认登录，可继续尝试但可能缺席'}
                   </p>
                   {enabled && selected && (
-                    <label style={{ marginTop: '0.8rem', letterSpacing: 0, textTransform: 'none', fontFamily: 'var(--serif-body)', fontSize: 14 }}>
-                      <input
-                        type="checkbox"
-                        checked={confirmations[candidate]}
-                        onChange={e => setConfirmations(prev => ({ ...prev, [candidate]: e.target.checked }))}
-                        style={{ width: 14, marginRight: 8 }}
-                      />
-                      我已确认该网页使用最高可用模型
-                    </label>
+                    <>
+                      <label style={{ marginTop: '0.8rem', letterSpacing: 0, textTransform: 'none', fontFamily: 'var(--serif-body)', fontSize: 14 }}>
+                        <input
+                          type="checkbox"
+                          checked={confirmations[candidate]}
+                          onChange={e => setConfirmations(prev => ({ ...prev, [candidate]: e.target.checked }))}
+                          style={{ width: 14, marginRight: 8 }}
+                        />
+                        我已确认该网页使用最高可用模型
+                      </label>
+                      <div style={{ marginTop: '0.8rem', display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        {(Object.keys(POSTURE_META) as ModelPosture[]).map(posture => (
+                          <button
+                            key={posture}
+                            type="button"
+                            className={modelPostures[candidate] === posture ? 'primary' : 'ghost'}
+                            onClick={() => setModelPostures(prev => ({ ...prev, [candidate]: posture }))}
+                            title={POSTURE_META[posture].desc}
+                            style={{ padding: '0.45rem 0.6rem' }}
+                          >
+                            {POSTURE_META[posture].label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
                   {status?.warning && <p className="faint" style={{ fontSize: 13 }}>{status.warning}</p>}
                 </div>

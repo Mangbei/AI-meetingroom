@@ -9,6 +9,8 @@ export interface MeetingRow {
   title: string
   goal: string
   mode: MeetingMode
+  agenda_rounds: number
+  model_postures_json: string
   participants_json: string
   moderator: MeetingModelName
   status: MeetingStatus
@@ -42,6 +44,7 @@ export interface MeetingMessageRow {
   meeting_id: string
   agenda_id: number | null
   turn_index: number
+  round_index: number
   role: string
   model: MeetingModelName
   content: string
@@ -74,12 +77,14 @@ export const meetings = {
     title: string
     goal: string
     mode: MeetingMode
+    agendaRounds: number
+    modelPostures: Partial<Record<MeetingModelName, string>>
     participants: MeetingModelName[]
     moderator: MeetingModelName
   }): void {
     db.prepare(
-      'INSERT INTO meetings (id, title, goal, mode, participants_json, moderator, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(args.id, args.title, args.goal, args.mode, JSON.stringify(args.participants),
+      'INSERT INTO meetings (id, title, goal, mode, agenda_rounds, model_postures_json, participants_json, moderator, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(args.id, args.title, args.goal, args.mode, args.agendaRounds, JSON.stringify(args.modelPostures), JSON.stringify(args.participants),
       args.moderator, 'pending', Date.now())
   },
 
@@ -143,13 +148,14 @@ export const meetingMessages = {
     meetingId: string
     agendaId: number | null
     turnIndex: number
+    roundIndex?: number
     role: string
     model: MeetingModelName
     content: string
   }): void {
     db.prepare(
-      'INSERT INTO meeting_messages (meeting_id, agenda_id, turn_index, role, model, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(args.meetingId, args.agendaId, args.turnIndex, args.role, args.model, args.content, Date.now())
+      'INSERT INTO meeting_messages (meeting_id, agenda_id, turn_index, round_index, role, model, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(args.meetingId, args.agendaId, args.turnIndex, args.roundIndex ?? 0, args.role, args.model, args.content, Date.now())
   },
 
   updateLatest(meetingId: string, agendaId: number | null, model: MeetingModelName, content: string): number | undefined {

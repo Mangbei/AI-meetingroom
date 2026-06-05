@@ -6,7 +6,14 @@ import {
   type AgendaItemRow, type MeetingMode,
   type MeetingFileRow,
 } from '../storage/repository.js'
-import { agendaPrompt, agendaSummaryPrompt, finalSummaryPrompt, type MeetingContext } from './prompts.js'
+import {
+  agendaPrompt,
+  agendaSummaryPrompt,
+  finalSummaryPrompt,
+  type MeetingContext,
+  type MeetingTurnInput,
+  type ModelPostures,
+} from './prompts.js'
 import { archiveMeeting } from './archive.js'
 import { notifyMeetingDone } from './notify.js'
 import type { UploadedMeetingFile } from './files.js'
@@ -15,9 +22,9 @@ export type { UploadedMeetingFile } from './files.js'
 
 export type MeetingEvent =
   | { type: 'agenda_started'; meetingId: string; agendaId: number; agendaIndex: number; question: string }
-  | { type: 'turn_started'; meetingId: string; agendaId?: number | null; turnIndex: number; role: string; model: MeetingModelName }
-  | { type: 'delta'; meetingId: string; agendaId?: number | null; turnIndex: number; role: string; model: MeetingModelName; content: string }
-  | { type: 'message_complete'; meetingId: string; agendaId?: number | null; turnIndex: number; role: string; model: MeetingModelName; content: string }
+  | { type: 'turn_started'; meetingId: string; agendaId?: number | null; turnIndex: number; roundIndex?: number; role: string; model: MeetingModelName }
+  | { type: 'delta'; meetingId: string; agendaId?: number | null; turnIndex: number; roundIndex?: number; role: string; model: MeetingModelName; content: string }
+  | { type: 'message_complete'; meetingId: string; agendaId?: number | null; turnIndex: number; roundIndex?: number; role: string; model: MeetingModelName; content: string }
   | { type: 'model_status'; meetingId: string; model: MeetingModelName; status: 'opening' | 'ready' | 'speaking' | 'complete' | 'skipped' | 'error'; detail?: string }
   | { type: 'file_delivery'; meetingId: string; model: MeetingModelName; filename?: string; status: 'trying' | 'uploaded' | 'fallback' | 'error'; method?: FileDeliveryMode; attempt?: number; detail?: string }
   | { type: 'agenda_summary'; meetingId: string; agendaId: number; agendaIndex: number; content: string }
@@ -41,6 +48,8 @@ export interface CreateMeetingInput {
   title: string
   goal: string
   mode: MeetingMode
+  agendaRounds?: number
+  modelPostures?: ModelPostures
   participants: MeetingModelName[]
   moderator: MeetingModelName
   agenda: string[]
@@ -57,6 +66,15 @@ function recordModelStatus(
 ): void {
   meetingLogs.insert({ meetingId, kind: 'model_status', model, status, detail })
   emit({ type: 'model_status', meetingId, model, status, detail })
+}
+
+function safeParsePostures(json: string | undefined): ModelPostures {
+  if (!json) return {}
+  try {
+    return JSON.parse(json) as ModelPostures
+  } catch {
+    return {}
+  }
 }
 
 function recordFileDelivery(
@@ -90,24 +108,25 @@ async function runModelTurn(args: {
   meetingId: string
   agendaId: number | null
   turnIndex: number
+  roundIndex?: number
   role: string
   model: MeetingModelName
   adapter: SiteAdapter
   prompt: string
   emit: Emit
 }): Promise<string> {
-  const { meetingId, agendaId, turnIndex, role, model, adapter, prompt, emit } = args
-  emit({ type: 'turn_started', meetingId, agendaId, turnIndex, role, model })
+  const { meetingId, agendaId, turnIndex, roundIndex, role, model, adapter, prompt, emit } = args
+  emit({ type: 'turn_started', meetingId, agendaId, turnIndex, roundIndex, role, model })
   console.log(`[meeting ${meetingId}] turn ${turnIndex} start: ${role}/${model}`)
   try {
     recordModelStatus(meetingId, model, 'speaking', emit, role)
     await adapter.focus?.()
     await adapter.sendMessage(prompt)
     const content = await adapter.streamResponse(delta => {
-      emit({ type: 'delta', meetingId, agendaId, turnIndex, role, model, content: delta })
+      emit({ type: 'delta', meetingId, agendaId, turnIndex, roundIndex, role, model, content: delta })
     })
-    meetingMessages.insert({ meetingId, agendaId, turnIndex, role, model, content })
-    emit({ type: 'message_complete', meetingId, agendaId, turnIndex, role, model, content })
+    meetingMessages.insert({ meetingId, agendaId, turnIndex, roundIndex: roundIndex ?? 0, role, model, content })
+    emit({ type: 'message_complete', meetingId, agendaId, turnIndex, roundIndex, role, model, content })
     if (!content.trim()) throw new Error(`${model} returned empty content`)
     recordModelStatus(meetingId, model, 'complete', emit, role)
     console.log(`[meeting ${meetingId}] turn ${turnIndex} complete: ${role}/${model}, ${content.length} chars`)
@@ -115,7 +134,7 @@ async function runModelTurn(args: {
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     const content = `[ERROR: ${error}]`
-    meetingMessages.insert({ meetingId, agendaId, turnIndex, role, model, content })
+    meetingMessages.insert({ meetingId, agendaId, turnIndex, roundIndex: roundIndex ?? 0, role, model, content })
     emit({ type: 'error', meetingId, agendaId, model, error })
     recordModelStatus(meetingId, model, 'error', emit, `${role}: ${error}`)
     console.error(`[meeting ${meetingId}] turn ${turnIndex} error: ${role}/${model}: ${error}`)
@@ -238,6 +257,11 @@ export async function runMeeting(
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`)
   const storedFiles = meetingFiles.listByMeeting(meetingId)
   const storedAgenda = agendaItems.listByMeeting(meetingId)
+  const agendaRounds = Math.min(5, Math.max(1, Number(input.agendaRounds ?? meeting.agenda_rounds ?? 1)))
+  const modelPostures: ModelPostures = {
+    ...safeParsePostures(meeting.model_postures_json),
+    ...(input.modelPostures ?? {}),
+  }
   const configs: MeetingModelConfigs = {
     ...DEFAULT_MEETING_MODEL_CONFIGS,
     ...input.modelConfigs,
@@ -260,8 +284,10 @@ export async function runMeeting(
     title: input.title,
     goal: input.goal,
     mode: input.mode,
+    agendaRounds,
     participants: activeParticipants,
     moderator,
+    modelPostures,
   }
 
   const ctxFor = (model: MeetingModelName): MeetingContext => ({
@@ -284,8 +310,9 @@ export async function runMeeting(
     agendaIndex: number
     question: string
     model: MeetingModelName
-    previousTurns: { model: MeetingModelName; content: string }[]
-  }): Promise<{ model: MeetingModelName; content: string } | null> => {
+    roundIndex: number
+    previousTurns: MeetingTurnInput[]
+  }): Promise<MeetingTurnInput | null> => {
     const adapter = adapters[args.model]
     if (!adapter) return null
     try {
@@ -293,19 +320,21 @@ export async function runMeeting(
         meetingId,
         agendaId: args.agendaId,
         turnIndex: turnIndex++,
+        roundIndex: args.roundIndex,
         role: 'participant',
         model: args.model,
         adapter,
         prompt: agendaPrompt({
           ctx: ctxFor(args.model),
           agendaIndex: args.agendaIndex,
+          roundIndex: args.roundIndex,
           question: args.question,
           model: args.model,
           previousTurns: args.previousTurns,
         }),
         emit,
       })
-      return { model: args.model, content }
+      return { model: args.model, content, roundIndex: args.roundIndex }
     } catch {
       failedModels.add(args.model)
       return null
@@ -316,7 +345,7 @@ export async function runMeeting(
     agendaId: number | null
     agendaIndex?: number
     question?: string
-    turns?: { model: MeetingModelName; content: string }[]
+    turns?: MeetingTurnInput[]
     agendaSummaries?: { question: string; summary: string }[]
     role: 'agenda_summary' | 'final_summary'
   }): Promise<{ model: MeetingModelName; content: string }> => {
@@ -356,23 +385,30 @@ export async function runMeeting(
   for (let agendaIndex = 0; agendaIndex < storedAgenda.length; agendaIndex++) {
     const item: AgendaItemRow = storedAgenda[agendaIndex]
     emit({ type: 'agenda_started', meetingId, agendaId: item.id, agendaIndex, question: item.question })
-    const turns: { model: MeetingModelName; content: string }[] = []
+    const turns: MeetingTurnInput[] = []
 
-    if (input.mode === 'parallel') {
-      const results = await Promise.all(runnableParticipants().map(model =>
-        runParticipantTurn({ agendaId: item.id, agendaIndex, question: item.question, model, previousTurns: [] })
-      ))
-      turns.push(...results.filter((result): result is { model: MeetingModelName; content: string } => !!result))
-    } else {
-      for (const model of runnableParticipants()) {
-        const result = await runParticipantTurn({
-          agendaId: item.id,
-          agendaIndex,
-          question: item.question,
-          model,
-          previousTurns: turns,
-        })
-        if (result) turns.push(result)
+    for (let roundIndex = 0; roundIndex < agendaRounds; roundIndex++) {
+      const roundParticipants = runnableParticipants()
+      if (!roundParticipants.length) break
+
+      if (input.mode === 'parallel') {
+        const previousTurns = [...turns]
+        const results = await Promise.all(roundParticipants.map(model =>
+          runParticipantTurn({ agendaId: item.id, agendaIndex, roundIndex, question: item.question, model, previousTurns })
+        ))
+        turns.push(...results.filter((result): result is MeetingTurnInput => !!result))
+      } else {
+        for (const model of roundParticipants) {
+          const result = await runParticipantTurn({
+            agendaId: item.id,
+            agendaIndex,
+            roundIndex,
+            question: item.question,
+            model,
+            previousTurns: turns,
+          })
+          if (result) turns.push(result)
+        }
       }
     }
 

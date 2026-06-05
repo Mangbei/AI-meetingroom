@@ -4,6 +4,7 @@ import type { MeetingModelName } from '../lib/models.ts'
 export interface MeetingMessageStream {
   agendaId: number | null
   turnIndex: number
+  roundIndex: number
   role: string
   model: MeetingModelName
   content: string
@@ -38,6 +39,7 @@ interface MeetingEvent {
   meetingId: string
   agendaId?: number | null
   turnIndex?: number
+  roundIndex?: number
   role?: string
   model?: MeetingModelName
   content?: string
@@ -90,6 +92,7 @@ function applyEvent(prev: MeetingLiveState, ev: MeetingEvent): MeetingLiveState 
       streams: [...prev.streams, {
         agendaId: ev.agendaId ?? null,
         turnIndex: ev.turnIndex,
+        roundIndex: ev.roundIndex ?? 0,
         role: ev.role,
         model: ev.model,
         content: '',
@@ -107,6 +110,7 @@ function applyEvent(prev: MeetingLiveState, ev: MeetingEvent): MeetingLiveState 
     const next = {
       agendaId: ev.agendaId ?? null,
       turnIndex: ev.turnIndex,
+      roundIndex: ev.roundIndex ?? streams[idx]?.roundIndex ?? 0,
       role: ev.role,
       model: ev.model,
       content: nextContent,

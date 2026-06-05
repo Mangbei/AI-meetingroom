@@ -24,6 +24,24 @@ try {
   // Column already exists.
 }
 
+try {
+  _db.exec(`ALTER TABLE meetings ADD COLUMN agenda_rounds INTEGER NOT NULL DEFAULT 1`)
+} catch {
+  // Column already exists.
+}
+
+try {
+  _db.exec(`ALTER TABLE meetings ADD COLUMN model_postures_json TEXT NOT NULL DEFAULT '{}'`)
+} catch {
+  // Column already exists.
+}
+
+try {
+  _db.exec(`ALTER TABLE meeting_messages ADD COLUMN round_index INTEGER NOT NULL DEFAULT 0`)
+} catch {
+  // Column already exists.
+}
+
 // Any meeting stuck at 'pending'/'running' belongs to a previous server process.
 // Mark it as 'error' so the UI shows captured partial output.
 _db.exec(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`)
