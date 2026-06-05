@@ -147,6 +147,33 @@ ${roundRule}
 `.trim()
 }
 
+export function agendaDraftPrompt(args: {
+  ctx: MeetingContext
+  seedAgenda: string[]
+}): string {
+  const seed = args.seedAgenda.length
+    ? args.seedAgenda.map((item, index) => `${index + 1}. ${item}`).join('\n')
+    : '用户没有手动指定议程，请你从主题、目标和材料中自行提出。'
+
+  return `
+你是本次多模型会议的主持人 ${args.ctx.moderator}。正式开会前，请先为这场会议拟定 3-5 个议程问题。
+
+${buildMaterialPack(args.ctx)}
+
+## 用户已有议程或提示
+${seed}
+
+## 任务
+请生成 3-5 个会议议程。每个议程尽量控制在一句到两句话，必须能引发后续讨论、质疑、比较和收束，而不是泛泛的大标题。
+
+请严格按以下格式输出，不要添加解释：
+
+1. 议程问题
+2. 议程问题
+3. 议程问题
+`.trim()
+}
+
 export function agendaSummaryPrompt(args: {
   ctx: MeetingContext
   agendaIndex: number

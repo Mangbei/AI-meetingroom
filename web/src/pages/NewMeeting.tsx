@@ -158,10 +158,10 @@ export default function NewMeeting() {
   }, [moderator, participants])
 
   const canSubmit = useMemo(() => {
-    return title.trim() && goal.trim() && agenda.some(q => q.trim()) &&
+    return title.trim() && goal.trim() &&
       participants.length >= 2 && participants.length <= 5 &&
       participants.every(m => confirmations[m]) && !readingFiles
-  }, [agenda, confirmations, goal, participants, readingFiles, title])
+  }, [confirmations, goal, participants, readingFiles, title])
 
   const toggleParticipant = (model: MeetingModelName) => {
     setError('')
@@ -249,18 +249,6 @@ export default function NewMeeting() {
     e.preventDefault()
     if (!canSubmit) return
 
-    const notReady = participants.filter(model => runtimeStatus[model] && runtimeStatus[model]?.loggedIn === false)
-    if (notReady.length) {
-      const remaining = participants.length - notReady.length
-      const names = notReady.map(model => MODEL_META[model].display).join('、')
-      const ok = window.confirm(
-        remaining >= 2
-          ? `${names} 当前未检测到登录或连通。继续后系统会尝试让它入会，失败则自动缺席。是否继续？`
-          : `${names} 当前未检测到登录或连通。当前可能不足 2 位模型可用，是否仍然尝试开始？`,
-      )
-      if (!ok) return
-    }
-
     setSubmitting(true)
     setError('')
     try {
@@ -271,7 +259,7 @@ export default function NewMeeting() {
         size: file.size,
         dataBase64: file.dataBase64,
       }))
-      const res = await fetch('/api/meetings', {
+      const res = await fetch('/api/meetings/agenda-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -289,7 +277,7 @@ export default function NewMeeting() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? res.statusText)
-      navigate(`/meetings/${data.id}`)
+      navigate(`/meetings/agenda-review/${data.draftId}`)
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err))
       setSubmitting(false)
@@ -360,21 +348,21 @@ export default function NewMeeting() {
         </section>
 
         <section style={{ margin: '2rem 0', paddingTop: '1.2rem', borderTop: '1px solid var(--rule)' }}>
-          <label>议程问题</label>
+          <label>已有议程提示（可选）</label>
           {agenda.map((q, i) => (
             <div key={i} style={{ display: 'flex', gap: '0.8rem', marginBottom: '0.8rem' }}>
               <textarea
                 rows={2}
                 value={q}
                 onChange={e => setAgenda(prev => prev.map((x, idx) => idx === i ? e.target.value : x))}
-                placeholder={`议程 ${i + 1}`}
+                placeholder={`给主持人的议程参考 ${i + 1}`}
               />
               <button type="button" className="ghost" onClick={() => setAgenda(prev => prev.filter((_, idx) => idx !== i))}>
                 删除
               </button>
             </div>
           ))}
-          <button type="button" className="ghost" onClick={() => setAgenda(prev => [...prev, ''])}>添加议程</button>
+          <button type="button" className="ghost" onClick={() => setAgenda(prev => [...prev, ''])}>添加参考议程</button>
         </section>
 
         <section style={{ margin: '2rem 0', paddingTop: '1.2rem', borderTop: '1px solid var(--rule)' }}>
@@ -400,7 +388,7 @@ export default function NewMeeting() {
               {checkingStatus ? '检查中...' : '刷新连通性'}
             </button>
             <span className="byline faint" style={{ textTransform: 'none', letterSpacing: 0 }}>
-              选择 2-5 位；当前已接入 3 位，其他模型显示为规划中。
+              选择 2-5 位；当前已接入 3 位，其他模型已确认未接入，暂不可选。
             </span>
           </div>
 
@@ -433,7 +421,7 @@ export default function NewMeeting() {
                   <p className="faint" style={{ fontSize: 13 }}>{meta.role}</p>
                   <p style={{ color: status?.loggedIn ? 'var(--paper-mute)' : 'var(--vermilion)', fontStyle: 'italic', fontSize: 14 }}>
                     {!enabled
-                      ? '规划中，等待适配器'
+                      ? '已确认未接入，等待适配器'
                       : status?.loggedIn
                         ? '已检测到登录或需人工确认'
                         : '未确认登录，可继续尝试但可能缺席'}
@@ -472,7 +460,7 @@ export default function NewMeeting() {
           </div>
 
           <div className="field" style={{ marginTop: '1.4rem' }}>
-            <label>主持人 / 最终归纳者</label>
+            <label>主持人 / 议程拟定者 / 最终归纳者</label>
             <select value={moderator} onChange={e => setModerator(e.target.value as MeetingModelName)}>
               {participants.map(m => <option key={m} value={m}>{MODEL_META[m].display}</option>)}
             </select>
@@ -481,7 +469,7 @@ export default function NewMeeting() {
 
         {error && <p style={{ color: 'var(--vermilion)', marginBottom: '1rem' }}>{error}</p>}
         <button type="submit" className="primary" disabled={!canSubmit || submitting}>
-          {submitting ? '正在开会...' : '开始会议'}
+          {submitting ? '正在生成议程...' : '生成议程草案'}
         </button>
       </form>
     </div>

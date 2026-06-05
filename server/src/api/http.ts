@@ -1,9 +1,9 @@
 import express, { Router } from 'express'
 import { v4 as uuid } from 'uuid'
 import { CDPSession } from '../browser/cdp.js'
-import { ADAPTER_REGISTRY, MEETING_MODELS } from '../browser/adapters/index.js'
+import { ADAPTER_REGISTRY, DEFAULT_MEETING_MODEL_CONFIGS, MEETING_MODELS } from '../browser/adapters/index.js'
 import type { MeetingModelName } from '../browser/adapters/index.js'
-import type { RuntimeStatus } from '../browser/adapters/base.js'
+import type { ModelConfig, RuntimeStatus } from '../browser/adapters/base.js'
 import {
   agendaItems,
   meetingArtifacts,
@@ -14,16 +14,38 @@ import {
 } from '../storage/repository.js'
 import { runMeeting, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
 import { renderMeetingMarkdown } from '../meeting/archive.js'
-import type { ModelPosture, ModelPostures } from '../meeting/prompts.js'
+import {
+  agendaDraftPrompt,
+  type MeetingContext,
+  type ModelPosture,
+  type ModelPostures,
+} from '../meeting/prompts.js'
 import {
   ACCEPTED_FILE_EXTENSIONS,
   kindFromFilename,
   prepareMeetingFiles,
+  type PreparedMeetingFile,
   type UploadedMeetingFile,
 } from '../meeting/files.js'
 
 type WsClients = Map<string, Set<(event: MeetingEvent) => void>>
 const MODEL_POSTURES = new Set<ModelPosture>(['cooperative', 'balanced', 'critical'])
+
+interface AgendaDraftRecord {
+  id: string
+  title: string
+  goal: string
+  mode: 'relay' | 'parallel'
+  agendaRounds: number
+  participants: MeetingModelName[]
+  moderator: MeetingModelName
+  modelPostures: ModelPostures
+  preparedFiles: PreparedMeetingFile[]
+  suggestedAgenda: string[]
+  raw: string
+  warning: string
+  createdAt: number
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
@@ -80,9 +102,212 @@ function defaultRuntimeStatus(model: MeetingModelName, loggedIn: boolean, warnin
   }
 }
 
+function fallbackAgenda(goal: string, seedAgenda: string[]): string[] {
+  const cleaned = seedAgenda.map(item => item.trim()).filter(Boolean)
+  if (cleaned.length >= 3) return cleaned.slice(0, 5)
+  return [
+    `基于当前资料，先判断这个主题最值得讨论的核心问题是什么？`,
+    `围绕“${goal.slice(0, 42) || '会议目标'}”，有哪些主要方案、方向或候选路径值得比较？`,
+    '目前材料中最强的证据、最薄弱的假设和最大的风险分别是什么？',
+    '如果要马上推进，下一步应该采取什么具体行动，并如何验证效果？',
+  ].slice(0, 5)
+}
+
+function parseAgendaDraft(text: string, goal: string, seedAgenda: string[]): string[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map(line => line
+      .replace(/^\s*(?:[-*]|\d+[.)、]|[（(]\d+[）)])\s*/, '')
+      .replace(/^议程\s*\d+\s*[:：-]?\s*/i, '')
+      .trim())
+    .filter(line => line.length >= 6 && !/^#+\s*/.test(line))
+
+  const seen = new Set<string>()
+  const agenda: string[] = []
+  for (const line of lines) {
+    const normalized = line.replace(/\s+/g, '')
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    agenda.push(line.length > 180 ? `${line.slice(0, 180)}...` : line)
+    if (agenda.length >= 5) break
+  }
+
+  return agenda.length >= 3 ? agenda : fallbackAgenda(goal, seedAgenda)
+}
+
 export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
   const router = Router()
+  const agendaDrafts = new Map<string, AgendaDraftRecord>()
   router.use(express.json({ limit: '80mb' }))
+
+  router.post('/meetings/agenda-draft', async (req, res) => {
+    try {
+      const body = req.body as Partial<CreateMeetingInput> & {
+        confirmations?: Partial<Record<MeetingModelName, boolean>>
+      }
+      const title = (body.title ?? '').trim()
+      const goal = (body.goal ?? '').trim()
+      const mode = body.mode === 'parallel' ? 'parallel' : 'relay'
+      const participants = pickModels(body.participants)
+      const agendaRounds = pickAgendaRounds(body.agendaRounds)
+      const modelPostures = pickModelPostures(body.modelPostures, participants)
+      const moderator = body.moderator as MeetingModelName | undefined
+      const seedAgenda = (body.agenda ?? []).map(q => q.trim()).filter(Boolean)
+      const files = (body.files ?? []) as UploadedMeetingFile[]
+
+      if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
+      if (participants.length < 2 || participants.length > 5) {
+        return res.status(400).json({ error: '请选择 2 到 5 位参会模型；当前已接入 ChatGPT、Gemini、DeepSeek' })
+      }
+      if (!moderator || !participants.includes(moderator)) {
+        return res.status(400).json({ error: '主持人必须是参会模型之一' })
+      }
+      if (!body.confirmations?.[moderator]) {
+        return res.status(400).json({ error: `请先确认主持人 ${moderator} 已选择最高可用模型` })
+      }
+      for (const file of files) {
+        if (!file.filename || (!file.dataBase64 && file.content == null)) {
+          return res.status(400).json({ error: '上传文件需要文件名和原始内容' })
+        }
+        if (!kindFromFilename(file.filename)) {
+          return res.status(400).json({
+            error: `暂不支持该文件格式：${file.filename}。当前支持：${ACCEPTED_FILE_EXTENSIONS.join(', ')}`,
+          })
+        }
+      }
+
+      const draftId = `draft-${uuid()}`
+      const preparedFiles = await prepareMeetingFiles(draftId, files)
+      const ctx: MeetingContext = {
+        title,
+        goal,
+        mode,
+        agendaRounds,
+        participants,
+        moderator,
+        modelPostures,
+        files: preparedFiles.map(file => ({ filename: file.filename, content: file.content })),
+      }
+
+      const prompt = agendaDraftPrompt({ ctx, seedAgenda })
+      let raw = ''
+      let warning = ''
+      try {
+        const page = await cdp.ensurePage(moderator)
+        const adapter = ADAPTER_REGISTRY[moderator].ctor()
+        adapter.setPage(page)
+        await adapter.ensureReady()
+        await adapter.newConversation()
+        if (adapter.configure) await adapter.configure(DEFAULT_MEETING_MODEL_CONFIGS[moderator] as ModelConfig)
+        await adapter.focus?.()
+        await adapter.sendMessage(prompt)
+        raw = await adapter.streamResponse(() => {})
+      } catch (err) {
+        warning = `主持人网页生成议程失败，已使用本地保底议程：${err instanceof Error ? err.message : String(err)}`
+      }
+
+      const agenda = parseAgendaDraft(raw, goal, seedAgenda)
+      agendaDrafts.set(draftId, {
+        id: draftId,
+        title,
+        goal,
+        mode,
+        agendaRounds,
+        participants,
+        moderator,
+        modelPostures,
+        preparedFiles,
+        suggestedAgenda: agenda,
+        raw,
+        warning,
+        createdAt: Date.now(),
+      })
+      res.json({ draftId, agenda, raw, warning })
+    } catch (err) {
+      console.error('[agenda draft] failed:', err)
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  router.get('/meetings/agenda-drafts/:draftId', (req, res) => {
+    const draft = agendaDrafts.get(req.params.draftId)
+    if (!draft) return res.status(404).json({ error: 'agenda draft not found or expired' })
+    res.json({
+      id: draft.id,
+      title: draft.title,
+      goal: draft.goal,
+      mode: draft.mode,
+      agendaRounds: draft.agendaRounds,
+      participants: draft.participants,
+      moderator: draft.moderator,
+      modelPostures: draft.modelPostures,
+      suggestedAgenda: draft.suggestedAgenda,
+      raw: draft.raw,
+      warning: draft.warning,
+      createdAt: draft.createdAt,
+      files: draft.preparedFiles.map(file => ({
+        filename: file.filename,
+        kind: file.kind,
+        size: file.size,
+      })),
+    })
+  })
+
+  router.post('/meetings/agenda-drafts/:draftId/start', async (req, res) => {
+    try {
+      const draft = agendaDrafts.get(req.params.draftId)
+      if (!draft) return res.status(404).json({ error: 'agenda draft not found or expired' })
+      const agenda = ((req.body?.agenda ?? draft.suggestedAgenda) as unknown[])
+        .map(item => String(item ?? '').trim())
+        .filter(Boolean)
+      if (agenda.length === 0) return res.status(400).json({ error: '至少需要一个议程问题' })
+
+      const id = uuid()
+      meetings.create({
+        id,
+        title: draft.title,
+        goal: draft.goal,
+        mode: draft.mode,
+        agendaRounds: draft.agendaRounds,
+        modelPostures: draft.modelPostures,
+        participants: draft.participants,
+        moderator: draft.moderator,
+      })
+      draft.preparedFiles.forEach(file => meetingFiles.insert(id, file.filename, file.kind, file.content, file.originalPath))
+      agenda.forEach((question, position) => agendaItems.insert(id, position, question))
+      agendaDrafts.delete(req.params.draftId)
+
+      res.json({ id })
+
+      const input: CreateMeetingInput = {
+        title: draft.title,
+        goal: draft.goal,
+        mode: draft.mode,
+        agendaRounds: draft.agendaRounds,
+        modelPostures: draft.modelPostures,
+        participants: draft.participants,
+        moderator: draft.moderator,
+        agenda,
+        files: draft.preparedFiles.map(file => ({
+          filename: file.filename,
+          kind: file.kind,
+          content: file.content,
+        })),
+      }
+      const emit = (event: MeetingEvent) => {
+        const listeners = wsClients.get(id)
+        listeners?.forEach(fn => fn(event))
+      }
+      runMeeting(id, input, cdp, emit).catch(err => {
+        console.error('[meeting] fatal error:', err)
+        emit({ type: 'error', meetingId: id, error: String(err) })
+        meetings.setStatus(id, 'error')
+      })
+    } catch (err) {
+      console.error('[agenda draft start] failed:', err)
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
 
   router.post('/meetings', async (req, res) => {
     try {
