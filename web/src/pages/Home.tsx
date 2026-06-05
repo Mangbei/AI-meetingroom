@@ -37,9 +37,9 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 const MODEL_DISPLAY: Record<string, string> = {
-  claude: 'Claude',
   chatgpt: 'ChatGPT',
   deepseek: 'DeepSeek',
+  gemini: 'Gemini',
 }
 
 export default function Home() {
@@ -132,7 +132,7 @@ export default function Home() {
       }}>
         <div>
           <div className="byline" style={{ marginBottom: '0.5rem' }}>
-            第 <span style={{ color: 'var(--paper)' }}>{debates.length || '—'}</span> 期 · 三方论辩月报
+            第 <span style={{ color: 'var(--paper)' }}>{meetings.length || '—'}</span> 场 · 多模型会议记录
           </div>
           <h1 className="display" style={{
             fontSize: 'clamp(40px, 5.5vw, 68px)',
@@ -143,7 +143,7 @@ export default function Home() {
             alignItems: 'baseline',
             gap: '0.3em',
           }}>
-            辩论广场
+            AI Meeting Room
             <span style={{
               fontStyle: 'italic',
               fontWeight: 400,
@@ -163,18 +163,13 @@ export default function Home() {
             maxWidth: 540,
             lineHeight: 1.55,
           }}>
-            三位 AI 围绕你给的议题各陈己见、相互批评、再综合迭代，最终交出比任何单方更完整的方案。
+            ChatGPT、Gemini、DeepSeek 围绕你的资料和议程开会讨论，最后生成可保存、可导出的会议纪要。
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
-          <button className="primary" onClick={() => navigate('/meetings/new')}>
-            新建会议
-          </button>
-          <button className="ghost" onClick={() => navigate('/new')}>
-            旧版辩论
-          </button>
-        </div>
+        <button className="primary" onClick={() => navigate('/meetings/new')}>
+          新建会议
+        </button>
       </header>
 
       {loading ? (
