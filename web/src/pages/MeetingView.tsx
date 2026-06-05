@@ -52,23 +52,37 @@ export default function MeetingView() {
 
   useEffect(() => {
     if (!id) return
-    fetch(`/api/meetings/${id}`)
-      .then(r => r.json())
-      .then(data => {
-        setMeeting(data.meeting)
-        setAgenda(data.agenda ?? [])
-        setArtifact(data.artifact ?? null)
-        setLiveMode(data.meeting?.status === 'pending' || data.meeting?.status === 'running')
-        setStaticStreams((data.messages ?? []).map((m: StoredMessage) => ({
-          agendaId: m.agenda_id,
-          turnIndex: m.turn_index,
-          role: m.role,
-          model: m.model,
-          content: m.content,
-          complete: true,
-        })))
-      })
-      .catch(console.error)
+    let cancelled = false
+    let timer: ReturnType<typeof setInterval> | undefined
+
+    const load = () => {
+      fetch(`/api/meetings/${id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (cancelled) return
+          const isLive = data.meeting?.status === 'pending' || data.meeting?.status === 'running'
+          setMeeting(data.meeting)
+          setAgenda(data.agenda ?? [])
+          setArtifact(data.artifact ?? null)
+          setLiveMode(isLive)
+          setStaticStreams((data.messages ?? []).map((m: StoredMessage) => ({
+            agendaId: m.agenda_id,
+            turnIndex: m.turn_index,
+            role: m.role,
+            model: m.model,
+            content: m.content,
+            complete: true,
+          })))
+        })
+        .catch(console.error)
+    }
+
+    load()
+    timer = setInterval(load, 4000)
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
+    }
   }, [id])
 
   const streams = useMemo(() => {

@@ -20,6 +20,7 @@ export type MeetingEvent =
   | { type: 'error'; meetingId: string; agendaId?: number | null; model?: MeetingModelName; error: string }
 
 type Emit = (event: MeetingEvent) => void
+const APP_ORIGIN = process.env.APP_ORIGIN ?? 'http://localhost:5173'
 
 export interface UploadedMeetingFile {
   filename: string
@@ -50,7 +51,9 @@ async function runModelTurn(args: {
 }): Promise<string> {
   const { meetingId, agendaId, turnIndex, role, model, adapter, prompt, emit } = args
   emit({ type: 'turn_started', meetingId, agendaId, turnIndex, role, model })
+  console.log(`[meeting ${meetingId}] turn ${turnIndex} start: ${role}/${model}`)
   try {
+    await adapter.focus?.()
     await adapter.sendMessage(prompt)
     const content = await adapter.streamResponse(delta => {
       emit({ type: 'delta', meetingId, agendaId, turnIndex, role, model, content: delta })
@@ -58,12 +61,14 @@ async function runModelTurn(args: {
     meetingMessages.insert({ meetingId, agendaId, turnIndex, role, model, content })
     emit({ type: 'message_complete', meetingId, agendaId, turnIndex, role, model, content })
     if (!content.trim()) throw new Error(`${model} returned empty content`)
+    console.log(`[meeting ${meetingId}] turn ${turnIndex} complete: ${role}/${model}, ${content.length} chars`)
     return content
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     const content = `[ERROR: ${error}]`
     meetingMessages.insert({ meetingId, agendaId, turnIndex, role, model, content })
     emit({ type: 'error', meetingId, agendaId, model, error })
+    console.error(`[meeting ${meetingId}] turn ${turnIndex} error: ${role}/${model}: ${error}`)
     throw err
   }
 }
@@ -93,6 +98,7 @@ export async function runMeeting(
   emit: Emit,
 ): Promise<void> {
   meetings.setStatus(meetingId, 'running')
+  console.log(`[meeting ${meetingId}] started: ${input.title}`)
 
   const meeting = meetings.get(meetingId)
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`)
@@ -194,5 +200,7 @@ export async function runMeeting(
   meetings.markDone(meetingId)
   emit({ type: 'final_summary', meetingId, content: finalSummary, ...archive })
   emit({ type: 'done', meetingId })
+  await cdp.openUrl(`${APP_ORIGIN}/meetings/${meetingId}`).catch(() => {})
+  console.log(`[meeting ${meetingId}] done: ${archive.summaryPath}`)
   await notifyMeetingDone(input.title, archive.summaryPath)
 }

@@ -35,6 +35,10 @@ export class DeepSeekAdapter implements SiteAdapter {
     this.page = page
   }
 
+  async focus(): Promise<void> {
+    await this.page.bringToFront().catch(() => {})
+  }
+
   // Set a toggle to a specific state (true = on/active, false = off/inactive)
   private async setToggle(selector: string, label: string, desiredOn: boolean): Promise<void> {
     try {

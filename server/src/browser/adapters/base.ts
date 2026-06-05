@@ -30,6 +30,7 @@ export type ModelConfig = DeepSeekConfig | GeminiConfig | ChatGPTConfig | Record
 export interface SiteAdapter {
   readonly name: string
   setPage(page: Page): void
+  focus?(): Promise<void>
   ensureReady(): Promise<void>
   newConversation(): Promise<void>
   sendMessage(text: string): Promise<void>

@@ -40,6 +40,10 @@ export class GeminiAdapter implements SiteAdapter {
     this.page = page
   }
 
+  async focus(): Promise<void> {
+    await this.page.bringToFront().catch(() => {})
+  }
+
   async ensureReady(): Promise<void> {
     if (!this.page.url().startsWith('https://gemini.google.com')) {
       await this.page.goto('https://gemini.google.com/app', { waitUntil: 'domcontentloaded' })

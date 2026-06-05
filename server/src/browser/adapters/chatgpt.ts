@@ -21,6 +21,10 @@ export class ChatGPTAdapter implements SiteAdapter {
     this.page = page
   }
 
+  async focus(): Promise<void> {
+    await this.page.bringToFront().catch(() => {})
+  }
+
   async ensureReady(): Promise<void> {
     const url = this.page.url()
     if (!url.startsWith('https://chatgpt.com') && !url.startsWith('https://chat.openai.com')) {
