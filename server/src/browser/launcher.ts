@@ -9,59 +9,87 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'
 const PROFILE_DIR = join(PROJECT_ROOT, '.local-data', 'browser-profile')
 const BASE_PORT = 9222
 
-const CHROME_PATHS_MAC = [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+interface BrowserCandidate {
+  name: string
+  paths: string[]
+}
+
+interface BrowserBinary {
+  name: string
+  path: string
+}
+
+const BROWSER_CANDIDATES_MAC: BrowserCandidate[] = [
+  { name: 'Google Chrome', paths: ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] },
+  { name: 'Chromium', paths: ['/Applications/Chromium.app/Contents/MacOS/Chromium'] },
+  { name: 'Microsoft Edge', paths: ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'] },
 ]
 
-const CHROME_PATHS_LINUX = [
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/chromium',
-  '/snap/bin/chromium',
-  '/usr/bin/microsoft-edge',
-  '/usr/bin/microsoft-edge-stable',
+const BROWSER_CANDIDATES_LINUX: BrowserCandidate[] = [
+  { name: 'Google Chrome', paths: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'] },
+  { name: 'Chromium', paths: ['/usr/bin/chromium-browser', '/usr/bin/chromium', '/snap/bin/chromium'] },
+  { name: 'Microsoft Edge', paths: ['/usr/bin/microsoft-edge', '/usr/bin/microsoft-edge-stable'] },
 ]
 
-function chromePathsWin(): string[] {
+function browserCandidatesWin(): BrowserCandidate[] {
   const programFiles    = process.env['ProgramFiles']      ?? 'C:\\Program Files'
   const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
   const localAppData    = process.env['LOCALAPPDATA']      ?? join(homedir(), 'AppData', 'Local')
   return [
-    join(programFiles,    'Google', 'Chrome', 'Application', 'chrome.exe'),
-    join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    join(localAppData,    'Google', 'Chrome', 'Application', 'chrome.exe'),
-    join(programFiles,    'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    join(localAppData,    'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    join(programFiles,    'Chromium', 'Application', 'chrome.exe'),
+    {
+      name: 'Google Chrome',
+      paths: [
+        join(programFiles,    'Google', 'Chrome', 'Application', 'chrome.exe'),
+        join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        join(localAppData,    'Google', 'Chrome', 'Application', 'chrome.exe'),
+      ],
+    },
+    {
+      name: 'Chromium',
+      paths: [
+        join(programFiles, 'Chromium', 'Application', 'chrome.exe'),
+        join(localAppData, 'Chromium', 'Application', 'chrome.exe'),
+      ],
+    },
+    {
+      name: 'Microsoft Edge',
+      paths: [
+        join(programFiles,    'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        join(localAppData,    'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      ],
+    },
   ]
 }
 
-function findBrowserBinary(): string {
+function browserCandidates(): BrowserCandidate[] {
+  return process.platform === 'win32' ? browserCandidatesWin() :
+    process.platform === 'linux' ? BROWSER_CANDIDATES_LINUX :
+    BROWSER_CANDIDATES_MAC
+}
+
+function findBrowserBinary(): BrowserBinary {
   const candidates =
-    process.platform === 'win32' ? chromePathsWin() :
-    process.platform === 'linux' ? CHROME_PATHS_LINUX :
-                                   CHROME_PATHS_MAC
-  for (const p of candidates) {
-    if (existsSync(p)) return p
+    browserCandidates()
+  for (const candidate of candidates) {
+    for (const path of candidate.paths) {
+      if (existsSync(path)) return { name: candidate.name, path }
+    }
   }
   throw new Error(
-    `No Chrome/Edge/Chromium installation found on ${process.platform}. ` +
+    `No Chrome/Chromium/Edge installation found on ${process.platform}. ` +
     `Install Google Chrome or Microsoft Edge, or set BROWSER_BINARY env var.`
   )
 }
 
 // Allow override via env var (useful for non-standard installs / portable Chrome)
-function resolveBrowserBinary(): string {
+function resolveBrowserBinary(): BrowserBinary {
   const override = process.env.BROWSER_BINARY
   if (override) {
     if (!existsSync(override)) {
       throw new Error(`BROWSER_BINARY="${override}" does not exist`)
     }
-    return override
+    return { name: 'custom browser', path: override }
   }
   return findBrowserBinary()
 }
@@ -119,7 +147,9 @@ export async function launchBrowser(): Promise<BrowserLaunchResult> {
     '--start-maximized',
   ]
 
-  const proc = spawn(binary, args, {
+  console.log(`[launcher] Launching ${binary.name}: ${binary.path}`)
+
+  const proc = spawn(binary.path, args, {
     detached: false,
     stdio: 'ignore',
   })

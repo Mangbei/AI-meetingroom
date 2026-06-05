@@ -35,6 +35,27 @@ http://localhost:5173/meetings/new
 http://localhost:3001
 ```
 
+## 浏览器策略
+
+后端自动化浏览器会按这个顺序查找：
+
+```text
+Google Chrome -> Chromium -> Microsoft Edge
+```
+
+所以在你的电脑上会优先打开 Chrome；如果某台电脑没有 Chrome，才会 fallback 到 Chromium 或 Edge。启动日志会显示实际使用的浏览器和路径，例如：
+
+```text
+[launcher] Launching Google Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+如果浏览器安装在特殊位置，可以手动指定：
+
+```powershell
+$env:BROWSER_BINARY="C:\Program Files\Google\Chrome\Application\chrome.exe"
+npm.cmd run dev
+```
+
 ## 使用流程
 
 1. 打开 `/meetings/new`
