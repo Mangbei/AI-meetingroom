@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { CDPSession } from '../browser/cdp.js'
 import { ADAPTER_REGISTRY, MEETING_MODELS } from '../browser/adapters/index.js'
 import type { MeetingModelName } from '../browser/adapters/index.js'
+import type { RuntimeStatus } from '../browser/adapters/base.js'
 import {
   agendaItems, meetingArtifacts, meetingFiles, meetingMessages, meetings,
 } from '../storage/repository.js'
@@ -10,6 +11,35 @@ import { runMeeting, type CreateMeetingInput, type MeetingEvent, type UploadedMe
 import { renderMeetingMarkdown } from '../meeting/archive.js'
 
 type WsClients = Map<string, Set<(event: MeetingEvent) => void>>
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(fallback), timeoutMs)
+    promise
+      .then(value => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch(() => {
+        clearTimeout(timer)
+        resolve(fallback)
+      })
+  })
+}
+
+function defaultRuntimeStatus(model: MeetingModelName, loggedIn: boolean, warning?: string): RuntimeStatus {
+  return {
+    loggedIn,
+    requestedModel: model === 'chatgpt'
+      ? 'Highest thinking model'
+      : model === 'gemini'
+        ? 'Gemini Pro'
+        : 'DeepSeek R1 / 深度思考',
+    configured: model === 'deepseek' && loggedIn,
+    needsManualConfirmation: model !== 'deepseek',
+    warning,
+  }
+}
 
 export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
   const router = Router()
@@ -28,19 +58,19 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     const agenda = (body.agenda ?? []).map(q => q.trim()).filter(Boolean)
     const files = (body.files ?? []) as UploadedMeetingFile[]
 
-    if (!title || !goal) return res.status(400).json({ error: 'title and goal are required' })
+    if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
     if (participants.length !== 3) return res.status(400).json({ error: '请选择 ChatGPT、Gemini、DeepSeek 三位参会者' })
     if (!moderator || !participants.includes(moderator)) {
-      return res.status(400).json({ error: 'moderator must be one of the participants' })
+      return res.status(400).json({ error: '主持人必须是参会模型之一' })
     }
-    if (agenda.length === 0) return res.status(400).json({ error: 'at least one agenda question is required' })
+    if (agenda.length === 0) return res.status(400).json({ error: '至少需要一个议程问题' })
     for (const model of participants) {
       if (!body.confirmations?.[model]) {
         return res.status(400).json({ error: `请先确认 ${model} 已选择最高可用模型` })
       }
     }
     for (const file of files) {
-      if (!file.filename || !file.content) return res.status(400).json({ error: 'uploaded files require filename and content' })
+      if (!file.filename || !file.content) return res.status(400).json({ error: '上传文件需要文件名和内容' })
       const lower = file.filename.toLowerCase()
       if (!lower.endsWith('.txt') && !lower.endsWith('.md')) {
         return res.status(400).json({ error: '首版仅支持 .txt 和 .md 文件' })
@@ -138,35 +168,40 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     }
   })
 
-  // GET /api/status — browser readiness
+  router.post('/browser/open-app', async (req, res) => {
+    try {
+      const url = typeof req.body?.url === 'string' ? req.body.url : 'http://localhost:5173/meetings/new'
+      const opened = await cdp.openUrl(url)
+      res.json({ ok: true, opened })
+    } catch (err) {
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   router.get('/status', async (_req, res) => {
     try {
-      const loginStatus = await cdp.allLoggedIn()
-      const runtimeStatus = Object.fromEntries(await Promise.all(MEETING_MODELS.map(async model => {
-        try {
+      const entries = await Promise.all(MEETING_MODELS.map(async model => {
+        const basicLoggedIn = await withTimeout(cdp.checkLoginStatus(model), 6_000, false)
+        const fallback = defaultRuntimeStatus(
+          model,
+          basicLoggedIn,
+          basicLoggedIn ? undefined : 'Login check timed out or found a logged-out page.',
+        )
+
+        const runtime = await withTimeout((async () => {
           const page = await cdp.ensurePage(model)
           const adapter = ADAPTER_REGISTRY[model].ctor()
           adapter.setPage(page)
-          await adapter.ensureReady()
-          const status = adapter.getRuntimeStatus
-            ? await adapter.getRuntimeStatus()
-            : {
-                loggedIn: loginStatus[model],
-                requestedModel: model === 'chatgpt' ? 'Highest thinking model' :
-                  model === 'deepseek' ? 'DeepSeek R1 / 深度思考' : 'Highest available model',
-                configured: model === 'deepseek',
-                needsManualConfirmation: model !== 'deepseek',
-              }
-          return [model, status]
-        } catch (err) {
-          return [model, {
-            loggedIn: false,
-            configured: false,
-            needsManualConfirmation: true,
-            warning: String(err),
-          }]
-        }
-      })))
+          if (!adapter.getRuntimeStatus) return fallback
+          const status = await adapter.getRuntimeStatus()
+          return { ...status, loggedIn: status.loggedIn || basicLoggedIn }
+        })(), 10_000, fallback)
+
+        return [model, runtime] as const
+      }))
+
+      const runtimeStatus = Object.fromEntries(entries)
+      const loginStatus = Object.fromEntries(entries.map(([model, status]) => [model, status.loggedIn]))
       res.json({ ready: true, loginStatus, runtimeStatus })
     } catch (err) {
       res.json({ ready: false, error: String(err) })

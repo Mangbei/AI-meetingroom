@@ -7,6 +7,31 @@ import { attachWebSocket } from './api/ws.js'
 import { createRouter } from './api/http.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
+const APP_URL = process.env.APP_URL ?? 'http://localhost:5173/meetings/new'
+
+async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      await fetch(url)
+      return true
+    } catch {
+      await new Promise(r => setTimeout(r, 800))
+    }
+  }
+  return false
+}
+
+async function openAppInControlledBrowser(cdp: CDPSession): Promise<void> {
+  if (process.env.OPEN_APP_IN_BROWSER === '0') return
+  const ready = await waitForHttp(APP_URL, 60_000)
+  if (!ready) {
+    console.warn(`[server] App URL not ready, skip opening controlled browser tab: ${APP_URL}`)
+    return
+  }
+  const openedUrl = await cdp.openUrl(APP_URL)
+  console.log(`[server] App opened in controlled browser: ${openedUrl}`)
+}
 
 async function main() {
   // Attach to an already-running browser when BROWSER_CDP_PORT is set
@@ -44,6 +69,9 @@ async function main() {
   server.listen(PORT, () => {
     console.log(`[server] API listening on http://localhost:${PORT}`)
     console.log(`[server] WebSocket on ws://localhost:${PORT}/ws/meetings/:id`)
+    openAppInControlledBrowser(cdp).catch(err => {
+      console.warn('[server] Failed to open app in controlled browser:', err)
+    })
   })
 
   process.on('SIGINT', async () => {

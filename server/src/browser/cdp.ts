@@ -8,17 +8,33 @@ const SITE_URLS: Record<SiteName, string> = {
   gemini: 'https://gemini.google.com',
 }
 
-// Each site's login-page URL fragment (when NOT logged in)
+const SITE_URL_PREFIXES: Record<SiteName, string[]> = {
+  chatgpt: ['https://chatgpt.com', 'https://chat.openai.com'],
+  deepseek: ['https://chat.deepseek.com'],
+  gemini: ['https://gemini.google.com'],
+}
+
 const LOGIN_URL_FRAGMENTS: Record<SiteName, string[]> = {
-  chatgpt: [],                         // ChatGPT stays at / even when logged out — use DOM check
+  chatgpt: [],
   deepseek: ['/sign_in', '/signin'],
   gemini: ['accounts.google.com'],
 }
 
-// DOM selector that is present ONLY when logged out
 const LOGGED_OUT_SELECTOR: Partial<Record<SiteName, string>> = {
-  chatgpt: 'button[data-testid="login-button"]',
-  gemini: 'a[href*="accounts.google.com"], button:has-text("Sign in"), button:has-text("登录")',
+  chatgpt: [
+    'button[data-testid="login-button"]',
+    'a[href*="/auth/login"]',
+    'button:has-text("Log in")',
+    'a:has-text("Log in")',
+    'button:has-text("登录")',
+    'a:has-text("登录")',
+  ].join(', '),
+  gemini: [
+    'button:has-text("Sign in")',
+    'a:has-text("Sign in")',
+    'button:has-text("登录")',
+    'a:has-text("登录")',
+  ].join(', '),
 }
 
 export class CDPSession {
@@ -36,18 +52,37 @@ export class CDPSession {
     const existing = this.pages.get(site)
     if (existing && !existing.isClosed()) return existing
 
-    // reuse an existing tab already on that domain
     for (const page of this.context.pages()) {
-      if (page.url().startsWith(SITE_URLS[site])) {
+      if (!page.isClosed() && SITE_URL_PREFIXES[site].some(prefix => page.url().startsWith(prefix))) {
         this.pages.set(site, page)
         return page
       }
     }
 
     const page = await this.context.newPage()
-    await page.goto(SITE_URLS[site], { waitUntil: 'domcontentloaded' })
+    await page.goto(SITE_URLS[site], { waitUntil: 'domcontentloaded', timeout: 20_000 })
     this.pages.set(site, page)
     return page
+  }
+
+  async openUrl(url: string): Promise<string> {
+    const target = new URL(url)
+    const prefix = `${target.protocol}//${target.host}`
+
+    for (const page of this.context.pages()) {
+      if (!page.isClosed() && page.url().startsWith(prefix)) {
+        if (page.url() !== url) {
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {})
+        }
+        await page.bringToFront().catch(() => {})
+        return page.url()
+      }
+    }
+
+    const page = await this.context.newPage()
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 })
+    await page.bringToFront().catch(() => {})
+    return page.url()
   }
 
   async openSites(sites: SiteName[]): Promise<Record<SiteName, string>> {
@@ -67,18 +102,15 @@ export class CDPSession {
   async checkLoginStatus(site: SiteName): Promise<boolean> {
     try {
       const page = await this.ensurePage(site)
-      await page.waitForLoadState('domcontentloaded').catch(() => {})
+      await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {})
 
       const url = page.url()
-
-      // URL-based check
       const fragments = LOGIN_URL_FRAGMENTS[site]
       if (fragments.length > 0 && fragments.some(f => url.includes(f))) return false
 
-      // DOM-based check
       const loggedOutSel = LOGGED_OUT_SELECTOR[site]
       if (loggedOutSel) {
-        const loggedOutEl = await page.$(loggedOutSel)
+        const loggedOutEl = await page.locator(loggedOutSel).first().isVisible({ timeout: 1500 }).catch(() => false)
         if (loggedOutEl) return false
       }
 
