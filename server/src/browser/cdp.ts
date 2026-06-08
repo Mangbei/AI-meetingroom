@@ -1,41 +1,9 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
+import { SITE_CONNECT, ALL_MODELS, type SiteConnect, type MeetingModelName } from './adapters/sites.js'
 
-type SiteName = 'chatgpt' | 'deepseek' | 'gemini'
-
-const SITE_URLS: Record<SiteName, string> = {
-  chatgpt: 'https://chatgpt.com',
-  deepseek: 'https://chat.deepseek.com',
-  gemini: 'https://gemini.google.com',
-}
-
-const SITE_URL_PREFIXES: Record<SiteName, string[]> = {
-  chatgpt: ['https://chatgpt.com', 'https://chat.openai.com'],
-  deepseek: ['https://chat.deepseek.com'],
-  gemini: ['https://gemini.google.com'],
-}
-
-const LOGIN_URL_FRAGMENTS: Record<SiteName, string[]> = {
-  chatgpt: [],
-  deepseek: ['/sign_in', '/signin'],
-  gemini: ['accounts.google.com'],
-}
-
-const LOGGED_OUT_SELECTOR: Partial<Record<SiteName, string>> = {
-  chatgpt: [
-    'button[data-testid="login-button"]',
-    'a[href*="/auth/login"]',
-    'button:has-text("Log in")',
-    'a:has-text("Log in")',
-    'button:has-text("登录")',
-    'a:has-text("登录")',
-  ].join(', '),
-  gemini: [
-    'button:has-text("Sign in")',
-    'a:has-text("Sign in")',
-    'button:has-text("登录")',
-    'a:has-text("登录")',
-  ].join(', '),
-}
+// Site connection details now live in one place (adapters/sites.ts) so the CDP
+// layer and the adapter registry can never drift apart on which models exist.
+type SiteName = MeetingModelName
 
 export class CDPSession {
   private browser!: Browser
@@ -53,14 +21,14 @@ export class CDPSession {
     if (existing && !existing.isClosed()) return existing
 
     for (const page of this.context.pages()) {
-      if (!page.isClosed() && SITE_URL_PREFIXES[site].some(prefix => page.url().startsWith(prefix))) {
+      if (!page.isClosed() && SITE_CONNECT[site].urlPrefixes.some(prefix => page.url().startsWith(prefix))) {
         this.pages.set(site, page)
         return page
       }
     }
 
     const page = await this.context.newPage()
-    await page.goto(SITE_URLS[site], { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    await page.goto(SITE_CONNECT[site].url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
     this.pages.set(site, page)
     return page
   }
@@ -105,10 +73,11 @@ export class CDPSession {
       await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {})
 
       const url = page.url()
-      const fragments = LOGIN_URL_FRAGMENTS[site]
+      const conn: SiteConnect = SITE_CONNECT[site]
+      const fragments = conn.loginUrlFragments
       if (fragments.length > 0 && fragments.some(f => url.includes(f))) return false
 
-      const loggedOutSel = LOGGED_OUT_SELECTOR[site]
+      const loggedOutSel = conn.loggedOutSelector
       if (loggedOutSel) {
         const loggedOutEl = await page.locator(loggedOutSel).first().isVisible({ timeout: 1500 }).catch(() => false)
         if (loggedOutEl) return false
@@ -121,9 +90,8 @@ export class CDPSession {
   }
 
   async allLoggedIn(): Promise<Record<SiteName, boolean>> {
-    const sites: SiteName[] = ['chatgpt', 'gemini', 'deepseek']
-    const results = await Promise.all(sites.map(s => this.checkLoginStatus(s)))
-    return Object.fromEntries(sites.map((s, i) => [s, results[i]])) as Record<SiteName, boolean>
+    const results = await Promise.all(ALL_MODELS.map(s => this.checkLoginStatus(s)))
+    return Object.fromEntries(ALL_MODELS.map((s, i) => [s, results[i]])) as Record<SiteName, boolean>
   }
 
   async disconnect(): Promise<void> {

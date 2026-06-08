@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
+import { ADAPTER_REGISTRY } from '../browser/adapters/index.js'
 import type { MeetingModelName } from '../browser/adapters/index.js'
 import type { AgendaItemRow, MeetingFileRow, MeetingMessageRow, MeetingRow } from '../storage/repository.js'
 
@@ -15,16 +16,12 @@ export interface ArchiveInput {
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const LOCAL_DATA_DIR = resolve(PROJECT_ROOT, '.local-data', 'meetings')
 
-const label: Record<MeetingModelName, string> = {
-  chatgpt: 'ChatGPT',
-  gemini: 'Gemini',
-  deepseek: 'DeepSeek',
-}
+const label = (model: MeetingModelName): string => ADAPTER_REGISTRY[model]?.displayName ?? model
 
 export function renderMeetingMarkdown(input: ArchiveInput): string {
   const participants = JSON.parse(input.meeting.participants_json) as MeetingModelName[]
   let md = `# ${input.meeting.title}\n\n`
-  md += `*模式：${input.meeting.mode} | 轮数：${input.meeting.agenda_rounds} | 主持人：${label[input.meeting.moderator]} | 参会者：${participants.map(p => label[p]).join('、')}*\n\n`
+  md += `*模式：${input.meeting.mode} | 轮数：${input.meeting.agenda_rounds} | 主持人：${label(input.meeting.moderator)} | 参会者：${participants.map(p => label(p)).join('、')}*\n\n`
   md += `## 会议目标\n\n${input.meeting.goal}\n\n`
 
   if (input.files.length) {
@@ -40,7 +37,7 @@ export function renderMeetingMarkdown(input: ArchiveInput): string {
     for (const round of rounds) {
       md += `### 第 ${round + 1} 轮\n\n`
       for (const turn of turns.filter(t => (t.round_index ?? 0) === round)) {
-        md += `#### ${label[turn.model] ?? turn.model}\n\n${turn.content}\n\n`
+        md += `#### ${label(turn.model)}\n\n${turn.content}\n\n`
       }
     }
     if (item.summary) md += `### 议程小结\n\n${item.summary}\n\n`

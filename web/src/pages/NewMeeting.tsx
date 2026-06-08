@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   MEETING_MODELS,
+  DEFAULT_PARTICIPANTS,
   MODEL_CANDIDATE_ORDER,
   MODEL_CANDIDATES,
   MODEL_META,
@@ -114,20 +115,16 @@ export default function NewMeeting() {
   const [goal, setGoal] = useState('')
   const [mode, setMode] = useState<MeetingMode>('relay')
   const [agendaRounds, setAgendaRounds] = useState(2)
-  const [participants, setParticipants] = useState<MeetingModelName[]>([...MEETING_MODELS])
+  const [participants, setParticipants] = useState<MeetingModelName[]>([...DEFAULT_PARTICIPANTS])
   const [moderator, setModerator] = useState<MeetingModelName>('chatgpt')
   const [agenda, setAgenda] = useState<string[]>([''])
   const [files, setFiles] = useState<UploadFile[]>([])
-  const [modelPostures, setModelPostures] = useState<Record<MeetingModelName, ModelPosture>>({
-    chatgpt: 'balanced',
-    gemini: 'balanced',
-    deepseek: 'balanced',
-  })
-  const [confirmations, setConfirmations] = useState<Record<MeetingModelName, boolean>>({
-    chatgpt: false,
-    gemini: false,
-    deepseek: false,
-  })
+  const [modelPostures, setModelPostures] = useState<Record<MeetingModelName, ModelPosture>>(
+    Object.fromEntries(MEETING_MODELS.map(m => [m, 'balanced'])) as Record<MeetingModelName, ModelPosture>,
+  )
+  const [confirmations, setConfirmations] = useState<Record<MeetingModelName, boolean>>(
+    Object.fromEntries(MEETING_MODELS.map(m => [m, false])) as Record<MeetingModelName, boolean>,
+  )
   const [runtimeStatus, setRuntimeStatus] = useState<Partial<Record<MeetingModelName, RuntimeStatus>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [openingTabs, setOpeningTabs] = useState(false)
@@ -149,7 +146,7 @@ export default function NewMeeting() {
   }
 
   useEffect(() => {
-    void refreshStatus(MEETING_MODELS)
+    void refreshStatus(DEFAULT_PARTICIPANTS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

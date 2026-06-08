@@ -1,6 +1,7 @@
-export type MeetingModelName = 'chatgpt' | 'gemini' | 'deepseek'
-export type PlannedModelName = 'claude' | 'doubao' | 'zhipu' | 'qwen'
-export type ModelCandidateName = MeetingModelName | PlannedModelName
+export type MeetingModelName =
+  | 'chatgpt' | 'gemini' | 'deepseek'
+  | 'claude' | 'doubao' | 'zhipu' | 'qwen' | 'yuanbao' | 'kimi'
+export type ModelCandidateName = MeetingModelName
 
 export interface ModelMeta {
   tone: string
@@ -11,6 +12,8 @@ export interface ModelMeta {
   role: string
   capabilities: string[]
 }
+
+const WEB_CAPS = ['登录检测', '附件直传', '页面结构自检']
 
 export const MODEL_CANDIDATES: Record<ModelCandidateName, ModelMeta> = {
   chatgpt: {
@@ -44,51 +47,78 @@ export const MODEL_CANDIDATES: Record<ModelCandidateName, ModelMeta> = {
     tone: '#d89562',
     display: 'Claude',
     latin: 'Anthropic',
-    targetModel: '已确认未接入：等待 Claude 网页端适配器',
-    enabled: false,
+    targetModel: '网页端最高可用模型（请手动确认）',
+    enabled: true,
     role: '长文审校与表达润色',
-    capabilities: ['未接入'],
+    capabilities: WEB_CAPS,
   },
   doubao: {
     tone: '#58b6a8',
     display: '豆包',
     latin: 'ByteDance',
-    targetModel: '已确认未接入：等待豆包网页端适配器',
-    enabled: false,
+    targetModel: '网页端最高可用模型（请手动确认）',
+    enabled: true,
     role: '中文表达与大众传播视角',
-    capabilities: ['未接入'],
+    capabilities: WEB_CAPS,
   },
   zhipu: {
     tone: '#b8a7ff',
-    display: '智谱',
+    display: '智谱清言',
     latin: 'Zhipu AI',
-    targetModel: '已确认未接入：等待智谱网页端适配器',
-    enabled: false,
-    role: '中文知识与政策语境',
-    capabilities: ['未接入'],
+    targetModel: '网页端最高可用模型（请手动确认）',
+    enabled: true,
+    role: '中文知识与本土语境',
+    capabilities: WEB_CAPS,
   },
   qwen: {
     tone: '#7db7ff',
-    display: '千问',
+    display: '通义千问',
     latin: 'Alibaba',
-    targetModel: '已确认未接入：等待通义千问网页端适配器',
-    enabled: false,
+    targetModel: '网页端最高可用模型（请手动确认）',
+    enabled: true,
     role: '工程化与中文资料补充',
-    capabilities: ['未接入'],
+    capabilities: WEB_CAPS,
+  },
+  yuanbao: {
+    tone: '#5b8ff9',
+    display: '腾讯元宝',
+    latin: 'Tencent',
+    targetModel: '网页端最高可用模型（请手动确认）',
+    enabled: true,
+    role: '综合搜索与事实核验',
+    capabilities: WEB_CAPS,
+  },
+  kimi: {
+    tone: '#9b8cff',
+    display: 'Kimi',
+    latin: 'Moonshot AI',
+    targetModel: '网页端最高可用模型（请手动确认）',
+    enabled: true,
+    role: '长上下文综合',
+    capabilities: WEB_CAPS,
   },
 }
 
-export const MODEL_META: Record<MeetingModelName, ModelMeta> = {
-  chatgpt: MODEL_CANDIDATES.chatgpt,
-  gemini: MODEL_CANDIDATES.gemini,
-  deepseek: MODEL_CANDIDATES.deepseek,
-}
+export const MODEL_META: Record<MeetingModelName, ModelMeta> = MODEL_CANDIDATES
 
 export const MODEL_ABBR: Record<MeetingModelName, string> = {
   chatgpt: 'GP',
   gemini: 'GM',
   deepseek: 'DS',
+  claude: 'CL',
+  doubao: 'DB',
+  zhipu: 'ZP',
+  qwen: 'QW',
+  yuanbao: 'YB',
+  kimi: 'KM',
 }
 
-export const MEETING_MODELS: MeetingModelName[] = ['chatgpt', 'gemini', 'deepseek']
-export const MODEL_CANDIDATE_ORDER: ModelCandidateName[] = ['chatgpt', 'gemini', 'deepseek', 'claude', 'doubao', 'zhipu', 'qwen']
+// Every model that has a working adapter and can be selected for a meeting.
+export const MEETING_MODELS: MeetingModelName[] =
+  ['chatgpt', 'gemini', 'deepseek', 'claude', 'doubao', 'zhipu', 'qwen', 'yuanbao', 'kimi']
+
+// Selected (and status-checked) by default, to avoid opening every tab at once.
+// Users can add any of the others from the participant list.
+export const DEFAULT_PARTICIPANTS: MeetingModelName[] = ['chatgpt', 'gemini', 'deepseek']
+
+export const MODEL_CANDIDATE_ORDER: ModelCandidateName[] = [...MEETING_MODELS]
