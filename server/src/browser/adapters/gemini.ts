@@ -1,5 +1,5 @@
 import { Page } from 'playwright'
-import { GeminiConfig, RuntimeStatus, SiteAdapter, waitFor } from './base.js'
+import { GeminiConfig, PreflightResult, RuntimeStatus, SiteAdapter, waitFor, streamUntilComplete } from './base.js'
 
 const SEL = {
   newChatButton: [
@@ -36,6 +36,13 @@ const SEL = {
     '[data-test-id*="response"]',
     '.markdown',
   ],
+  // While generating, Gemini shows a Stop button in place of Send. Best-effort
+  // signal; if it misses, the shared stream loop falls back to stability.
+  stopButton: [
+    'button[aria-label*="Stop"]',
+    'button[aria-label*="停止"]',
+    'button:has(mat-icon:has-text("stop"))',
+  ].join(', '),
   accountButton: 'button[aria-label*="Google Account"], a[href*="accounts.google.com"]',
 }
 
@@ -163,23 +170,35 @@ export class GeminiAdapter implements SiteAdapter {
     }, SEL.responseCandidates).catch(() => '')
   }
 
-  async streamResponse(onDelta: (chunk: string) => void): Promise<string> {
-    const HARD_TIMEOUT = Date.now() + 6 * 60 * 1000
-    const STABILITY_MS = 3000
-    let lastText = ''
-    let lastChangeAt = Date.now()
-
-    while (Date.now() < HARD_TIMEOUT) {
-      const current = await this.readLastAssistantMessage()
-      if (current && current !== lastText) {
-        const delta = current.slice(lastText.length)
-        if (delta) onDelta(delta)
-        lastText = current
-        lastChangeAt = Date.now()
+  private countResponses(): Promise<number> {
+    return this.page.evaluate((selectors) => {
+      for (const sel of selectors) {
+        const n = document.querySelectorAll(sel).length
+        if (n > 0) return n
       }
-      if (lastText && Date.now() - lastChangeAt >= STABILITY_MS) return lastText
-      await waitFor(500)
-    }
-    return lastText
+      return 0
+    }, SEL.responseCandidates).catch(() => 0)
+  }
+
+  async preflight(): Promise<PreflightResult> {
+    const missing: string[] = []
+    if (!(await this.page.locator(SEL.inputBox).first().count().catch(() => 0))) missing.push('inputBox')
+    return { ok: missing.length === 0, missing }
+  }
+
+  async streamResponse(onDelta: (chunk: string) => void): Promise<string> {
+    // Gemini exposes no reliable streaming attribute, so the stability window is
+    // the primary detector and is kept deliberately generous (12s) to avoid
+    // cutting off during a mid-reply thinking pause. The Stop button, when
+    // present, lets a reply finish promptly via the explicit-signal fast path.
+    const baselineCount = await this.countResponses()
+    return streamUntilComplete({
+      onDelta,
+      hardTimeoutMs: 6 * 60 * 1000,
+      stableMs: 12_000,
+      newMessageAppeared: async () => (await this.countResponses()) > baselineCount,
+      readText: () => this.readLastAssistantMessage(),
+      isStreaming: () => this.page.locator(SEL.stopButton).first().isVisible({ timeout: 400 }).catch(() => undefined),
+    })
   }
 }

@@ -1,5 +1,5 @@
 import { Page } from 'playwright'
-import { SiteAdapter, waitFor } from './base.js'
+import { SiteAdapter, PreflightResult, waitFor, streamUntilComplete } from './base.js'
 import { htmlToMarkdown } from '../markdown.js'
 
 // All ChatGPT selectors — update here if UI changes
@@ -93,10 +93,14 @@ export class ChatGPTAdapter implements SiteAdapter {
     await sendBtn.click()
   }
 
-  async hasAssistantMessage(): Promise<boolean> {
+  private countMsgs(): Promise<number> {
     return this.page.evaluate(() =>
-      document.querySelectorAll('[data-message-author-role="assistant"]').length > 0
-    ).catch(() => false)
+      document.querySelectorAll('[data-message-author-role="assistant"]').length
+    ).catch(() => 0)
+  }
+
+  async hasAssistantMessage(): Promise<boolean> {
+    return (await this.countMsgs()) > 0
   }
 
   async readLastAssistantMessage(): Promise<string> {
@@ -106,68 +110,27 @@ export class ChatGPTAdapter implements SiteAdapter {
       if (!last) return ''
       const md = last.querySelector('.markdown, .prose')
       return ((md ?? last) as HTMLElement).outerHTML ?? ''
-    })
+    }).catch(() => '')
     return htmlToMarkdown(html)
   }
 
+  async preflight(): Promise<PreflightResult> {
+    const missing: string[] = []
+    if (!(await this.page.locator(SEL.inputBox).first().count().catch(() => 0))) missing.push('inputBox')
+    return { ok: missing.length === 0, missing }
+  }
+
   async streamResponse(onDelta: (chunk: string) => void): Promise<string> {
-    const HARD_TIMEOUT = Date.now() + 5 * 60 * 1000
-
-    const countMsgs = (): Promise<number> =>
-      this.page.evaluate(() =>
-        document.querySelectorAll('[data-message-author-role="assistant"]').length
-      )
-
-    const getHtml = (): Promise<string> =>
-      this.page.evaluate(() => {
-        const msgs = document.querySelectorAll('[data-message-author-role="assistant"]')
-        const last = msgs[msgs.length - 1]
-        if (!last) return ''
-        const md = last.querySelector('.markdown, .prose')
-        return ((md ?? last) as HTMLElement).outerHTML ?? ''
-      })
-
-    const getText = async (): Promise<string> => htmlToMarkdown(await getHtml())
-
-    const isStreaming = (): Promise<boolean> =>
-      this.page.evaluate(() => !!document.querySelector('[data-stream-active]'))
-
-    // Baseline: messages already present before this send (same-session continuity)
-    const baselineCount = await countMsgs()
-
-    // Phase 1: wait for a NEW assistant message beyond the baseline
-    const deadline1 = Date.now() + 30_000
-    while (Date.now() < deadline1) {
-      if (await countMsgs() > baselineCount) break
-      await waitFor(300)
-    }
-
-    // Phase 2: stream content until data-stream-active disappears
-    let lastText = ''
-    let lastChangeAt = Date.now()
-
-    while (Date.now() < HARD_TIMEOUT) {
-      const current = await getText()
-      if (current !== lastText) {
-        const delta = current.slice(lastText.length)
-        if (delta) onDelta(delta)
-        lastText = current
-        lastChangeAt = Date.now()
-      }
-
-      const streaming = await isStreaming()
-
-      if (!streaming) {
-        // Double-check: give 1s for any trailing content
-        await waitFor(1000)
-        const final = await getText()
-        if (final !== lastText) onDelta(final.slice(lastText.length))
-        return final || lastText
-      }
-
-      await waitFor(300)
-    }
-
-    return lastText
+    // Baseline: messages already present before this send (same-session continuity).
+    const baselineCount = await this.countMsgs()
+    return streamUntilComplete({
+      onDelta,
+      hardTimeoutMs: 5 * 60 * 1000,
+      newMessageAppeared: async () => (await this.countMsgs()) > baselineCount,
+      readText: () => this.readLastAssistantMessage(),
+      // ChatGPT marks an element with data-stream-active while generating.
+      isStreaming: () =>
+        this.page.evaluate(() => !!document.querySelector('[data-stream-active]')).catch(() => undefined),
+    })
   }
 }

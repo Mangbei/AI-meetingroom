@@ -1,6 +1,6 @@
 import { CDPSession } from '../browser/cdp.js'
 import { ADAPTER_REGISTRY, DEFAULT_MEETING_MODEL_CONFIGS, MeetingModelConfigs, MeetingModelName } from '../browser/adapters/index.js'
-import type { ModelConfig, SiteAdapter } from '../browser/adapters/base.js'
+import { withRetry, type ModelConfig, type SiteAdapter } from '../browser/adapters/base.js'
 import {
   agendaItems, meetingArtifacts, meetingFiles, meetingLogs, meetingMessages, meetings,
   type AgendaItemRow, type MeetingMode,
@@ -121,13 +121,18 @@ async function runModelTurn(args: {
   try {
     recordModelStatus(meetingId, model, 'speaking', emit, role)
     await adapter.focus?.()
-    await adapter.sendMessage(prompt)
+    // Sending can fail transiently (input not yet rendered, slow page). The
+    // failure happens before the message is actually dispatched, so retrying is
+    // safe and avoids losing a whole turn to a momentary hiccup.
+    await withRetry(() => adapter.sendMessage(prompt), { attempts: 2, delayMs: 1000, label: `${model} sendMessage` })
     const content = await adapter.streamResponse(delta => {
       emit({ type: 'delta', meetingId, agendaId, turnIndex, roundIndex, role, model, content: delta })
     })
+    // Validate before persisting so an empty/failed capture is recorded as an
+    // error turn rather than a misleading "complete" with no content.
+    if (!content.trim()) throw new Error(`${model} returned empty content`)
     meetingMessages.insert({ meetingId, agendaId, turnIndex, roundIndex: roundIndex ?? 0, role, model, content })
     emit({ type: 'message_complete', meetingId, agendaId, turnIndex, roundIndex, role, model, content })
-    if (!content.trim()) throw new Error(`${model} returned empty content`)
     recordModelStatus(meetingId, model, 'complete', emit, role)
     console.log(`[meeting ${meetingId}] turn ${turnIndex} complete: ${role}/${model}, ${content.length} chars`)
     return content
@@ -162,6 +167,13 @@ async function prepareAdapters(
       adapter.setPage(page)
       await adapter.ensureReady()
       await adapter.newConversation()
+      // Self-check that critical DOM selectors still exist. If the site was
+      // redesigned, fail fast here with a clear reason instead of producing a
+      // mysterious empty/error turn mid-meeting.
+      const pf = await adapter.preflight?.()
+      if (pf && !pf.ok) {
+        throw new Error(`页面结构自检失败，缺少关键元素: ${pf.missing.join(', ')}（${model} 网站可能已改版，需更新选择器）`)
+      }
       if (adapter.configure) await adapter.configure(configs[model] as ModelConfig)
       fileDelivery[model] = await uploadOriginalFiles(meetingId, model, adapter, files, emit)
         ? 'original-upload'

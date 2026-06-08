@@ -1,5 +1,5 @@
 import { Page } from 'playwright'
-import { SiteAdapter, DeepSeekConfig, ModelConfig, waitFor } from './base.js'
+import { SiteAdapter, PreflightResult, DeepSeekConfig, ModelConfig, waitFor, streamUntilComplete } from './base.js'
 import { htmlToMarkdown } from '../markdown.js'
 
 // All DeepSeek selectors — update here if UI changes
@@ -10,6 +10,10 @@ const SEL = {
   // DeepSeek uses a <textarea> for input
   inputBox: 'textarea#chat-input, textarea[class*="chat"], textarea[class*="input"], textarea[placeholder]',
   sendButton: 'button[aria-label="send"], [class*="sendButton"]:not([class*="cancel"]), button[class*="send"]:not([class*="cancel"])',
+  // While generating, the send control swaps to a stop/cancel button. Best-effort
+  // signal: presence means "still streaming". If the selector misses, the shared
+  // stream loop safely falls back to content-stability detection.
+  stopButton: 'div[role="button"][aria-label*="停止"], button[aria-label*="Stop"], [class*="cancel"][role="button"], [class*="stop-icon"]',
   // 快速模式/专家模式 radios live in a [role="radiogroup"]; each radio carries
   // data-model-type="default" (fast) or "expert", with aria-checked reflecting state.
   modeRadioFast: 'div[role="radio"][data-model-type="default"]',
@@ -157,8 +161,12 @@ export class DeepSeekAdapter implements SiteAdapter {
     ).catch(() => false)
   }
 
-  async readLastAssistantMessage(): Promise<string> {
-    const html = await this.page.evaluate((selectors) => {
+  // Returns [count-of-outermost, outerHTML-of-last-outermost].
+  // DeepSeek nests ds-markdown inside ds-markdown; we only want top-level
+  // containers. HTML (not innerText) so turndown can preserve heading/list/
+  // table structure into the final markdown.
+  private getState(): Promise<[number, string]> {
+    return this.page.evaluate((selectors) => {
       for (const sel of selectors) {
         const all = document.querySelectorAll(sel)
         const outermost: Element[] = []
@@ -166,83 +174,42 @@ export class DeepSeekAdapter implements SiteAdapter {
           let nested = false
           for (let j = 0; j < all.length; j++) {
             if (j !== i && all[j] !== all[i] && all[j].contains(all[i])) {
-              nested = true; break
+              nested = true
+              break
             }
           }
           if (!nested) outermost.push(all[i])
         }
         if (outermost.length > 0) {
-          return (outermost[outermost.length - 1] as HTMLElement).outerHTML ?? ''
+          const last = outermost[outermost.length - 1] as HTMLElement
+          return [outermost.length, last.outerHTML ?? ''] as [number, string]
         }
       }
-      return ''
-    }, SEL.responseContainerSelectors)
+      return [0, ''] as [number, string]
+    }, SEL.responseContainerSelectors).catch(() => [0, ''] as [number, string])
+  }
+
+  async readLastAssistantMessage(): Promise<string> {
+    const [, html] = await this.getState()
     return htmlToMarkdown(html)
   }
 
+  async preflight(): Promise<PreflightResult> {
+    const missing: string[] = []
+    if (!(await this.page.locator(SEL.inputBox).first().count().catch(() => 0))) missing.push('inputBox')
+    return { ok: missing.length === 0, missing }
+  }
+
   async streamResponse(onDelta: (chunk: string) => void): Promise<string> {
-    const HARD_TIMEOUT = Date.now() + 5 * 60 * 1000
-    const STABILITY_MS = 2500
-
-    // Returns [count-of-outermost, outerHTML-of-last-outermost]
-    // DeepSeek nests ds-markdown inside ds-markdown; we only want top-level containers.
-    // HTML (not innerText) so we can run it through turndown server-side and
-    // preserve heading/list/table structure into the final markdown.
-    const getState = (): Promise<[number, string]> =>
-      this.page.evaluate((selectors) => {
-        for (const sel of selectors) {
-          const all = document.querySelectorAll(sel)
-          const outermost: Element[] = []
-          for (let i = 0; i < all.length; i++) {
-            let nested = false
-            for (let j = 0; j < all.length; j++) {
-              if (j !== i && all[j] !== all[i] && all[j].contains(all[i])) {
-                nested = true
-                break
-              }
-            }
-            if (!nested) outermost.push(all[i])
-          }
-          if (outermost.length > 0) {
-            const last = outermost[outermost.length - 1] as HTMLElement
-            return [outermost.length, last.outerHTML ?? ''] as [number, string]
-          }
-        }
-        return [0, ''] as [number, string]
-      }, SEL.responseContainerSelectors)
-
-    // Baseline: top-level response containers already on screen (same-session continuity)
-    const [baselineCount] = await getState()
-
-    // Phase 1: wait for a new outermost ds-markdown to appear (up to 30s)
-    const deadline1 = Date.now() + 30_000
-    while (Date.now() < deadline1) {
-      const [count] = await getState()
-      if (count > baselineCount) break
-      await waitFor(400)
-    }
-
-    // Phase 2: content-stability detection on the last outermost container
-    let lastText = ''
-    let lastChangeAt = Date.now()
-
-    while (Date.now() < HARD_TIMEOUT) {
-      const [, html] = await getState()
-      const current = htmlToMarkdown(html)
-      if (current !== lastText) {
-        const delta = current.slice(lastText.length)
-        if (delta) onDelta(delta)
-        lastText = current
-        lastChangeAt = Date.now()
-      }
-
-      if (lastText.length > 0 && Date.now() - lastChangeAt >= STABILITY_MS) {
-        return lastText
-      }
-
-      await waitFor(400)
-    }
-
-    return lastText
+    // Baseline: top-level response containers already on screen (same-session continuity).
+    const [baselineCount] = await this.getState()
+    return streamUntilComplete({
+      onDelta,
+      hardTimeoutMs: 5 * 60 * 1000,
+      newMessageAppeared: async () => (await this.getState())[0] > baselineCount,
+      readText: () => this.readLastAssistantMessage(),
+      // Best-effort: a stop button is visible only while generating.
+      isStreaming: () => this.page.locator(SEL.stopButton).first().isVisible({ timeout: 400 }).catch(() => undefined),
+    })
   }
 }
