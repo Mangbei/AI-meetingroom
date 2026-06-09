@@ -118,7 +118,8 @@ export const MEETING_MODELS: MeetingModelName[] =
   ['chatgpt', 'gemini', 'deepseek', 'claude', 'doubao', 'zhipu', 'qwen', 'yuanbao', 'kimi']
 
 // Selected (and status-checked) by default, to avoid opening every tab at once.
-// Users can add any of the others from the participant list.
-export const DEFAULT_PARTICIPANTS: MeetingModelName[] = ['chatgpt', 'gemini', 'deepseek']
+// Users can add any of the others from the participant list — checking one
+// opens that site's tab so they can log in on demand.
+export const DEFAULT_PARTICIPANTS: MeetingModelName[] = ['claude', 'gemini', 'chatgpt']
 
 export const MODEL_CANDIDATE_ORDER: ModelCandidateName[] = [...MEETING_MODELS]

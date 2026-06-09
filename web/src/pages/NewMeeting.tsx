@@ -162,20 +162,23 @@ export default function NewMeeting() {
 
   const toggleParticipant = (model: MeetingModelName) => {
     setError('')
-    setParticipants(prev => {
-      if (prev.includes(model)) {
-        if (prev.length <= 2) {
-          setError('至少需要 2 位模型入会')
-          return prev
-        }
-        return prev.filter(item => item !== model)
+    const isRemoving = participants.includes(model)
+    if (isRemoving) {
+      if (participants.length <= 2) {
+        setError('至少需要 2 位模型入会')
+        return
       }
-      if (prev.length >= 5) {
-        setError('最多选择 5 位模型')
-        return prev
-      }
-      return [...prev, model]
-    })
+      setParticipants(prev => prev.filter(item => item !== model))
+      return
+    }
+    if (participants.length >= 5) {
+      setError('最多选择 5 位模型')
+      return
+    }
+    setParticipants(prev => [...prev, model])
+    // Newly added: open that site's tab so the user can log in on demand,
+    // and refresh just its status. Mirrors a real attendee joining the room.
+    void openTabs([model])
   }
 
   const readFiles = async (list: FileList | null) => {
@@ -223,24 +226,27 @@ export default function NewMeeting() {
     }
   }
 
-  const openMeetingTabs = async () => {
+  const openTabs = async (models: MeetingModelName[]) => {
+    if (!models.length) return
     setOpeningTabs(true)
     setError('')
     try {
       const res = await fetch('/api/browser/open-meeting-tabs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ models: participants }),
+        body: JSON.stringify({ models }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? res.statusText)
-      await refreshStatus(participants)
+      await refreshStatus(models)
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err))
     } finally {
       setOpeningTabs(false)
     }
   }
+
+  const openMeetingTabs = () => openTabs(participants)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
