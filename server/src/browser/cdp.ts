@@ -28,7 +28,13 @@ export class CDPSession {
     }
 
     const page = await this.context.newPage()
-    await page.goto(SITE_CONNECT[site].url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    try {
+      await page.goto(SITE_CONNECT[site].url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    } catch (err) {
+      // Don't leak a blank tab if the initial navigation times out.
+      await page.close().catch(() => {})
+      throw err
+    }
     this.pages.set(site, page)
     return page
   }

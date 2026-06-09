@@ -139,6 +139,15 @@ function parseAgendaDraft(text: string, goal: string, seedAgenda: string[]): str
 export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
   const router = Router()
   const agendaDrafts = new Map<string, AgendaDraftRecord>()
+  // Drafts are an in-memory staging area before a meeting starts. Evict stale
+  // ones so abandoned drafts (generated but never started) don't accumulate.
+  const DRAFT_TTL_MS = 30 * 60 * 1000
+  setInterval(() => {
+    const now = Date.now()
+    for (const [id, draft] of agendaDrafts) {
+      if (now - draft.createdAt > DRAFT_TTL_MS) agendaDrafts.delete(id)
+    }
+  }, 5 * 60 * 1000).unref()
   router.use(express.json({ limit: '80mb' }))
 
   // Opt-in bearer-token auth: only enforced when MEETING_API_TOKEN is set, so
@@ -171,7 +180,7 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
 
       if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
       if (participants.length < 2 || participants.length > 5) {
-        return res.status(400).json({ error: '请选择 2 到 5 位参会模型；当前已接入 ChatGPT、Gemini、DeepSeek' })
+        return res.status(400).json({ error: '请选择 2 到 5 位参会模型' })
       }
       if (!moderator || !participants.includes(moderator)) {
         return res.status(400).json({ error: '主持人必须是参会模型之一' })
@@ -340,7 +349,7 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
 
       if (!title || !goal) return res.status(400).json({ error: '会议标题和会议目标必填' })
       if (participants.length < 2 || participants.length > 5) {
-        return res.status(400).json({ error: '请选择 2 到 5 位参会模型；当前已接入 ChatGPT、Gemini、DeepSeek' })
+        return res.status(400).json({ error: '请选择 2 到 5 位参会模型' })
       }
       if (!moderator || !participants.includes(moderator)) {
         return res.status(400).json({ error: '主持人必须是参会模型之一' })

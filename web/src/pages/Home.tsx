@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { MODEL_META, type MeetingModelName } from '../lib/models.ts'
 
 interface MeetingRow {
   id: string
@@ -25,11 +26,9 @@ const STATUS_COLOR: Record<string, string> = {
   error: 'var(--vermilion)',
 }
 
-const MODEL_DISPLAY: Record<string, string> = {
-  chatgpt: 'ChatGPT',
-  gemini: 'Gemini',
-  deepseek: 'DeepSeek',
-}
+// Pretty model name for any of the supported models, falling back to the raw key.
+const modelDisplay = (model: string): string =>
+  MODEL_META[model as MeetingModelName]?.display ?? model
 
 export default function Home() {
   const [meetings, setMeetings] = useState<MeetingRow[]>([])
@@ -176,7 +175,7 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="display" style={{ fontSize: 15, fontStyle: 'italic', color: 'var(--paper-mute)' }}>
-                  {MODEL_DISPLAY[m.moderator] ?? m.moderator}
+                  {modelDisplay(m.moderator)}
                 </div>
                 <div className="byline" style={{ textAlign: 'right', color: STATUS_COLOR[m.status] ?? 'var(--paper-mute)' }}>
                   {STATUS_LABEL[m.status] ?? m.status}

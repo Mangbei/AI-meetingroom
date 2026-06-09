@@ -28,13 +28,16 @@ export function attachWebSocket(server: Server): WsClients {
     }
     clients.get(meetingId)!.add(emit)
 
-    ws.on('close', () => {
-      clients.get(meetingId)?.delete(emit)
-    })
+    const cleanup = () => {
+      const listeners = clients.get(meetingId)
+      listeners?.delete(emit)
+      // Drop the bucket once nobody is listening so the map doesn't accumulate
+      // an empty Set per meeting ever viewed.
+      if (listeners && listeners.size === 0) clients.delete(meetingId)
+    }
 
-    ws.on('error', () => {
-      clients.get(meetingId)?.delete(emit)
-    })
+    ws.on('close', cleanup)
+    ws.on('error', cleanup)
   })
 
   return clients

@@ -13,6 +13,9 @@ mkdirSync(DATA_DIR, { recursive: true })
 const _db = new DatabaseSync(DB_PATH)
 _db.exec('PRAGMA journal_mode = WAL')
 _db.exec('PRAGMA foreign_keys = ON')
+// Wait briefly instead of failing immediately if a write lock is held — several
+// concurrent meetings write messages/status to the same DB.
+_db.exec('PRAGMA busy_timeout = 5000')
 
 const schemaPath = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql')
 const schema = readFileSync(schemaPath, 'utf-8')
@@ -50,7 +53,10 @@ try {
 
 // Any meeting stuck at 'pending'/'running' belongs to a previous server process.
 // Mark it as 'error' so the UI shows captured partial output.
-_db.exec(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`)
+const recovered = _db.prepare(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`).run()
+if (recovered.changes) {
+  console.warn(`[db] marked ${recovered.changes} interrupted meeting(s) as error after restart`)
+}
 
 // Minimal wrapper matching the better-sqlite3 API used in the codebase.
 export const db = {

@@ -547,7 +547,8 @@ async function runMeetingInner(
     console.warn(`[meeting ${meetingId}] structured minutes extraction failed:`, err)
   }
 
-  const freshMeeting = meetings.get(meetingId)!
+  const freshMeeting = meetings.get(meetingId)
+  if (!freshMeeting) throw new Error(`meeting record lost before archiving: ${meetingId}`)
   const archive = archiveMeeting({
     meeting: freshMeeting,
     files: meetingFiles.listByMeeting(meetingId),
