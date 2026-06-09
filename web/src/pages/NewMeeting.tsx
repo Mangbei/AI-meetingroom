@@ -11,7 +11,7 @@ import {
 } from '../lib/models.ts'
 
 type MeetingMode = 'relay' | 'parallel'
-type FileKind = 'txt' | 'md' | 'pdf' | 'docx' | 'doc' | 'xlsx' | 'xls' | 'csv'
+type FileKind = 'txt' | 'md' | 'pdf' | 'docx' | 'doc' | 'xlsx' | 'xls' | 'csv' | 'code' | 'ipynb'
 type ModelPosture = 'cooperative' | 'balanced' | 'critical'
 
 interface UploadFile {
@@ -48,7 +48,19 @@ const KIND_BY_EXT: Record<string, FileKind> = {
   xlsx: 'xlsx',
   xls: 'xls',
   csv: 'csv',
+  ipynb: 'ipynb',
 }
+
+// Common source/config extensions shown in the picker. Any other text file is
+// still accepted (kindFromName falls back to 'code'); the server rejects only
+// truly binary uploads.
+const CODE_EXTS = [
+  'py', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'json', 'java', 'kt', 'c', 'h',
+  'cc', 'cpp', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'sh', 'bash',
+  'sql', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'scss', 'vue',
+  'svelte', 'r', 'lua', 'pl', 'tex', 'rst',
+]
+for (const ext of CODE_EXTS) KIND_BY_EXT[ext] = 'code'
 
 const FILE_ACCEPT = [
   '.txt',
@@ -68,6 +80,8 @@ const FILE_ACCEPT = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ipynb',
+  ...CODE_EXTS.map(ext => `.${ext}`),
 ].join(',')
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -78,8 +92,13 @@ function isMeetingModel(model: ModelCandidateName): model is MeetingModelName {
 }
 
 function kindFromName(filename: string): FileKind | undefined {
-  const ext = filename.split('.').pop()?.toLowerCase()
-  return ext ? KIND_BY_EXT[ext] : undefined
+  const parts = filename.split('.')
+  if (parts.length < 2) return 'code' // extensionless files (Dockerfile, Makefile…) are usually text
+  const ext = parts.pop()?.toLowerCase()
+  if (!ext) return undefined
+  // Known kind wins; otherwise assume a text/code file and let the server do
+  // the final binary check.
+  return KIND_BY_EXT[ext] ?? 'code'
 }
 
 function formatBytes(bytes: number): string {
@@ -102,7 +121,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 async function buildPreview(file: File, kind: FileKind): Promise<string> {
-  if (kind === 'txt' || kind === 'md' || kind === 'csv') {
+  if (kind === 'txt' || kind === 'md' || kind === 'csv' || kind === 'code' || kind === 'ipynb') {
     const text = await file.text().catch(() => '')
     return text.slice(0, 500)
   }

@@ -347,13 +347,22 @@ async function runMeetingInner(
     modelPostures,
   }
 
+  // Even when the original file was attached in the chat UI, we still pass a
+  // trimmed text excerpt as a backup: some sites silently drop or fail to
+  // ingest an attachment, and without this the model would be left blind.
+  const BACKUP_EXCERPT_CHARS = 4_000
   const ctxFor = (model: MeetingModelName): MeetingContext => ({
     ...baseCtx,
     files: fileDelivery[model] === 'original-upload'
-      ? storedFiles.map(f => ({
-          filename: f.filename,
-          content: `[Original file uploaded to this AI session: ${f.filename}. Please prioritize the attached file in the chat UI. If the site did not ingest the attachment correctly, use the meeting discussion context and say so explicitly.]`,
-        }))
+      ? storedFiles.map(f => {
+          const excerpt = f.content.length > BACKUP_EXCERPT_CHARS
+            ? `${f.content.slice(0, BACKUP_EXCERPT_CHARS)}\n\n[文本兜底摘录已截断，完整内容以聊天窗口中附上的原文件为准。]`
+            : f.content
+          return {
+            filename: f.filename,
+            content: `[原文件已直接上传到本次会话：${f.filename}，请优先以聊天窗口中的附件为准。若网站未能正确读取附件，可改用下面的文本兜底摘录，并明确说明你是基于摘录而非完整附件作答。]\n\n${excerpt}`,
+          }
+        })
       : storedFiles.map(f => ({ filename: f.filename, content: f.content })),
   })
   const agendaSummaries: { question: string; summary: string }[] = []

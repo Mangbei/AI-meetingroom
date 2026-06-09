@@ -22,7 +22,7 @@ import {
 } from '../meeting/prompts.js'
 import {
   ACCEPTED_FILE_EXTENSIONS,
-  kindFromFilename,
+  isAcceptableUpload,
   prepareMeetingFiles,
   type PreparedMeetingFile,
   type UploadedMeetingFile,
@@ -169,9 +169,9 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
         if (!file.filename || (!file.dataBase64 && file.content == null)) {
           return res.status(400).json({ error: '上传文件需要文件名和原始内容' })
         }
-        if (!kindFromFilename(file.filename)) {
+        if (!isAcceptableUpload(file)) {
           return res.status(400).json({
-            error: `暂不支持该文件格式：${file.filename}。当前支持：${ACCEPTED_FILE_EXTENSIONS.join(', ')}`,
+            error: `暂不支持该文件格式：${file.filename}。支持常见文档（${ACCEPTED_FILE_EXTENSIONS.slice(0, 9).join(', ')} 等）、代码与文本文件。`,
           })
         }
       }
@@ -341,9 +341,9 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
         if (!file.filename || (!file.dataBase64 && file.content == null)) {
           return res.status(400).json({ error: '上传文件需要文件名和原始内容' })
         }
-        if (!kindFromFilename(file.filename)) {
+        if (!isAcceptableUpload(file)) {
           return res.status(400).json({
-            error: `暂不支持该文件格式：${file.filename}。当前支持：${ACCEPTED_FILE_EXTENSIONS.join(', ')}`,
+            error: `暂不支持该文件格式：${file.filename}。支持常见文档（${ACCEPTED_FILE_EXTENSIONS.slice(0, 9).join(', ')} 等）、代码与文本文件。`,
           })
         }
       }
