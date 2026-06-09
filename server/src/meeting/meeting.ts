@@ -29,11 +29,41 @@ export type MeetingEvent =
   | { type: 'file_delivery'; meetingId: string; model: MeetingModelName; filename?: string; status: 'trying' | 'uploaded' | 'fallback' | 'error'; method?: FileDeliveryMode; attempt?: number; detail?: string }
   | { type: 'agenda_summary'; meetingId: string; agendaId: number; agendaIndex: number; content: string }
   | { type: 'final_summary'; meetingId: string; content: string; archiveDir?: string; summaryPath?: string; jsonPath?: string }
+  | { type: 'human_note'; meetingId: string; agendaId?: number | null; content: string }
   | { type: 'done'; meetingId: string }
   | { type: 'error'; meetingId: string; agendaId?: number | null; model?: MeetingModelName; error: string }
 
 type Emit = (event: MeetingEvent) => void
 const APP_ORIGIN = process.env.APP_ORIGIN ?? 'http://localhost:5173'
+
+/**
+ * Pending human-moderator interventions, keyed by meeting id. The HTTP layer
+ * appends a note while a meeting is running; the meeting loop drains the queue
+ * at the start of each round and folds the notes into the next prompts so the
+ * models must respond — like a chair interjecting in a live meeting.
+ */
+const humanNoteQueue = new Map<string, string[]>()
+
+export function addHumanNote(meetingId: string, text: string): void {
+  const note = text.trim()
+  if (!note) return
+  const queue = humanNoteQueue.get(meetingId) ?? []
+  queue.push(note)
+  humanNoteQueue.set(meetingId, queue)
+}
+
+function drainHumanNotes(meetingId: string): string[] {
+  const queue = humanNoteQueue.get(meetingId)
+  if (!queue || !queue.length) return []
+  humanNoteQueue.set(meetingId, [])
+  return queue
+}
+
+export function isMeetingRunning(meetingId: string): boolean {
+  return runningMeetings.has(meetingId)
+}
+
+const runningMeetings = new Set<string>()
 
 type FileDeliveryMode = 'original-upload' | 'text-fallback'
 
@@ -262,6 +292,21 @@ export async function runMeeting(
   cdp: CDPSession,
   emit: Emit,
 ): Promise<void> {
+  runningMeetings.add(meetingId)
+  try {
+    await runMeetingInner(meetingId, input, cdp, emit)
+  } finally {
+    runningMeetings.delete(meetingId)
+    humanNoteQueue.delete(meetingId)
+  }
+}
+
+async function runMeetingInner(
+  meetingId: string,
+  input: CreateMeetingInput,
+  cdp: CDPSession,
+  emit: Emit,
+): Promise<void> {
   meetings.setStatus(meetingId, 'running')
   console.log(`[meeting ${meetingId}] started: ${input.title}`)
 
@@ -324,6 +369,7 @@ export async function runMeeting(
     model: MeetingModelName
     roundIndex: number
     previousTurns: MeetingTurnInput[]
+    humanNotes?: string[]
   }): Promise<MeetingTurnInput | null> => {
     const adapter = adapters[args.model]
     if (!adapter) return null
@@ -343,6 +389,7 @@ export async function runMeeting(
           question: args.question,
           model: args.model,
           previousTurns: args.previousTurns,
+          humanNotes: args.humanNotes,
         }),
         emit,
       })
@@ -359,6 +406,7 @@ export async function runMeeting(
     question?: string
     turns?: MeetingTurnInput[]
     agendaSummaries?: { question: string; summary: string }[]
+    humanNotes?: string[]
     role: 'agenda_summary' | 'final_summary'
   }): Promise<{ model: MeetingModelName; content: string }> => {
     const candidates = [moderator, ...activeParticipants.filter(model => model !== moderator)]
@@ -381,6 +429,7 @@ export async function runMeeting(
                 agendaIndex: args.agendaIndex ?? 0,
                 question: args.question ?? '',
                 turns: args.turns ?? [],
+                humanNotes: args.humanNotes,
               })
             : finalSummaryPrompt({ ctx: ctxFor(model), agendaSummaries: args.agendaSummaries ?? [] }),
           emit,
@@ -398,15 +447,26 @@ export async function runMeeting(
     const item: AgendaItemRow = storedAgenda[agendaIndex]
     emit({ type: 'agenda_started', meetingId, agendaId: item.id, agendaIndex, question: item.question })
     const turns: MeetingTurnInput[] = []
+    // All human-moderator interventions raised during this agenda, so the
+    // agenda summary can reflect anything raised in the final round too.
+    const agendaHumanNotes: string[] = []
 
     for (let roundIndex = 0; roundIndex < agendaRounds; roundIndex++) {
       const roundParticipants = runnableParticipants()
       if (!roundParticipants.length) break
 
+      // Pick up anything the human chair submitted since the last round and
+      // surface it in the live transcript before the models respond to it.
+      const humanNotes = drainHumanNotes(meetingId)
+      if (humanNotes.length) {
+        agendaHumanNotes.push(...humanNotes)
+        for (const note of humanNotes) emit({ type: 'human_note', meetingId, agendaId: item.id, content: note })
+      }
+
       if (input.mode === 'parallel') {
         const previousTurns = [...turns]
         const results = await Promise.all(roundParticipants.map(model =>
-          runParticipantTurn({ agendaId: item.id, agendaIndex, roundIndex, question: item.question, model, previousTurns })
+          runParticipantTurn({ agendaId: item.id, agendaIndex, roundIndex, question: item.question, model, previousTurns, humanNotes })
         ))
         turns.push(...results.filter((result): result is MeetingTurnInput => !!result))
       } else {
@@ -418,6 +478,7 @@ export async function runMeeting(
             question: item.question,
             model,
             previousTurns: turns,
+            humanNotes,
           })
           if (result) turns.push(result)
         }
@@ -426,11 +487,19 @@ export async function runMeeting(
 
     if (!turns.length) throw new Error(`No model produced a usable answer for agenda ${agendaIndex + 1}`)
 
+    // Drain any note submitted during the final round so the summary addresses it.
+    const tailNotes = drainHumanNotes(meetingId)
+    if (tailNotes.length) {
+      agendaHumanNotes.push(...tailNotes)
+      for (const note of tailNotes) emit({ type: 'human_note', meetingId, agendaId: item.id, content: note })
+    }
+
     const { content: summary } = await runSummaryTurn({
       agendaId: item.id,
       agendaIndex,
       question: item.question,
       turns,
+      humanNotes: agendaHumanNotes,
       role: 'agenda_summary',
     })
     agendaItems.updateSummary(item.id, summary)

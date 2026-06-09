@@ -21,10 +21,17 @@ export interface MeetingLogEntry {
   created_at?: number
 }
 
+export interface HumanNote {
+  agendaId: number | null
+  content: string
+  at: number
+}
+
 export interface MeetingLiveState {
   currentAgendaId: number | null
   streams: MeetingMessageStream[]
   agendaSummaries: Record<number, string>
+  humanNotes: HumanNote[]
   finalSummary: string
   archiveDir: string
   summaryPath: string
@@ -35,7 +42,7 @@ export interface MeetingLiveState {
 }
 
 interface MeetingEvent {
-  type: 'agenda_started' | 'turn_started' | 'delta' | 'message_complete' | 'model_status' | 'file_delivery' | 'agenda_summary' | 'final_summary' | 'done' | 'error'
+  type: 'agenda_started' | 'turn_started' | 'delta' | 'message_complete' | 'model_status' | 'file_delivery' | 'agenda_summary' | 'final_summary' | 'human_note' | 'done' | 'error'
   meetingId: string
   agendaId?: number | null
   turnIndex?: number
@@ -56,6 +63,7 @@ const INITIAL: MeetingLiveState = {
   currentAgendaId: null,
   streams: [],
   agendaSummaries: {},
+  humanNotes: [],
   finalSummary: '',
   archiveDir: '',
   summaryPath: '',
@@ -122,6 +130,12 @@ function applyEvent(prev: MeetingLiveState, ev: MeetingEvent): MeetingLiveState 
   }
   if (ev.type === 'agenda_summary' && ev.agendaId != null) {
     return { ...prev, agendaSummaries: { ...prev.agendaSummaries, [ev.agendaId]: ev.content ?? '' } }
+  }
+  if (ev.type === 'human_note') {
+    return {
+      ...prev,
+      humanNotes: [...prev.humanNotes, { agendaId: ev.agendaId ?? null, content: ev.content ?? '', at: Date.now() }],
+    }
   }
   if (ev.type === 'model_status' || ev.type === 'file_delivery') {
     return {

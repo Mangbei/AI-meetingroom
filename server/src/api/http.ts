@@ -12,7 +12,7 @@ import {
   meetingMessages,
   meetings,
 } from '../storage/repository.js'
-import { runMeeting, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
+import { runMeeting, addHumanNote, isMeetingRunning, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
 import { renderMeetingMarkdown } from '../meeting/archive.js'
 import {
   agendaDraftPrompt,
@@ -418,6 +418,23 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
     res.setHeader('Content-Disposition', `attachment; filename="meeting-${meeting.id.slice(0, 8)}.md"`)
     res.send(md)
+  })
+
+  // Human-moderator intervention: inject a note/question into a running meeting.
+  // The note is queued and folded into the next round's prompts so the models
+  // must respond, and echoed to all live viewers immediately.
+  router.post('/meetings/:id/intervene', (req, res) => {
+    const id = req.params.id
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
+    if (!text) return res.status(400).json({ error: 'empty note' })
+    if (text.length > 2000) return res.status(400).json({ error: 'note too long' })
+    if (!meetings.get(id)) return res.status(404).json({ error: 'meeting not found' })
+    if (!isMeetingRunning(id)) return res.status(409).json({ error: 'meeting is not running' })
+
+    addHumanNote(id, text)
+    const listeners = wsClients.get(id)
+    if (listeners) for (const send of listeners) send({ type: 'human_note', meetingId: id, content: text })
+    res.json({ ok: true })
   })
 
   router.post('/meetings/:id/messages/refetch', async (req, res) => {

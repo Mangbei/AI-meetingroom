@@ -87,6 +87,16 @@ ${files || '（无上传材料）'}
 `.trim()
 }
 
+function humanNoteSection(notes?: string[]): string {
+  if (!notes || !notes.length) return ''
+  const list = notes.map((n, i) => `${i + 1}. ${n}`).join('\n')
+  return `
+
+## 人类主持人插话（最高优先级，必须正面回应）
+真实主持人在会议进行中提出了以下内容，你必须在发言里优先、明确地回应，不能回避：
+${list}`
+}
+
 export function agendaPrompt(args: {
   ctx: MeetingContext
   agendaIndex: number
@@ -94,6 +104,7 @@ export function agendaPrompt(args: {
   question: string
   model: MeetingModelName
   previousTurns: MeetingTurnInput[]
+  humanNotes?: string[]
 }): string {
   const prior = args.previousTurns.length
     ? args.previousTurns
@@ -115,6 +126,7 @@ ${args.question}
 
 ## 当前轮次
 第 ${args.roundIndex + 1} / ${args.ctx.agendaRounds} 轮
+${humanNoteSection(args.humanNotes)}
 
 ## 前序发言
 ${prior}
@@ -179,6 +191,7 @@ export function agendaSummaryPrompt(args: {
   agendaIndex: number
   question: string
   turns: MeetingTurnInput[]
+  humanNotes?: string[]
 }): string {
   const turns = args.turns
     .map(t => `### 第 ${(t.roundIndex ?? 0) + 1} 轮 · ${t.model}\n${t.content}`)
@@ -191,6 +204,7 @@ ${buildMaterialPack(args.ctx)}
 
 ## 当前议程 ${args.agendaIndex + 1}
 ${args.question}
+${humanNoteSection(args.humanNotes)}
 
 ## 多轮发言记录
 ${turns}

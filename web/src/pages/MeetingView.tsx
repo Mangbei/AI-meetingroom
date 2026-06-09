@@ -54,6 +54,8 @@ export default function MeetingView() {
   const [liveMode, setLiveMode] = useState(false)
   const [refetching, setRefetching] = useState<string | null>(null)
   const [localError, setLocalError] = useState('')
+  const [note, setNote] = useState('')
+  const [sendingNote, setSendingNote] = useState(false)
   const live = useMeetingSocket(id, liveMode)
 
   useEffect(() => {
@@ -120,6 +122,28 @@ export default function MeetingView() {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+  }
+
+  const running = meeting?.status === 'running'
+
+  const sendNote = async () => {
+    if (!id || !note.trim() || sendingNote) return
+    setSendingNote(true)
+    setLocalError('')
+    try {
+      const res = await fetch(`/api/meetings/${id}/intervene`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: note.trim() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      setNote('')
+    } catch (err) {
+      setLocalError(String(err instanceof Error ? err.message : err))
+    } finally {
+      setSendingNote(false)
+    }
   }
 
   const refetchMessage = async (stream: MeetingMessageStream) => {
@@ -194,6 +218,12 @@ export default function MeetingView() {
                 </div>
               </div>
             ))}
+            {live.humanNotes.filter(n => n.agendaId === item.id).map((n, i) => (
+              <div key={`note-${i}`} style={{ marginTop: '1.2rem', borderLeft: '3px solid var(--gold, #d4a13a)', background: 'rgba(212,161,58,0.08)', padding: '0.7rem 1rem' }}>
+                <div className="byline" style={{ color: 'var(--gold, #d4a13a)' }}>🙋 主持人插话</div>
+                <div className="prose"><ReactMarkdown remarkPlugins={[remarkGfm]}>{n.content}</ReactMarkdown></div>
+              </div>
+            ))}
             {summary && (
               <div style={{ marginTop: '1.5rem', borderLeft: '2px solid var(--vermilion)', paddingLeft: '1rem' }}>
                 <div className="byline">议程小结</div>
@@ -224,6 +254,29 @@ export default function MeetingView() {
           {archiveDir && <span className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>archive: {archiveDir}</span>}
         </div>
       </section>
+
+      {running && (
+        <div style={{
+          position: 'sticky', bottom: 0, marginTop: '1.5rem', padding: '0.9rem 1rem',
+          background: 'var(--ink, #14110d)', borderTop: '1.5px solid var(--rule)',
+          display: 'flex', gap: '0.7rem', alignItems: 'flex-end', flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div className="byline" style={{ marginBottom: '0.4rem' }}>🙋 主持人插话（会注入下一轮，模型必须回应）</div>
+            <textarea
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void sendNote() }}
+              placeholder="例如：请大家重点评估方案 B 的落地成本；或追问某个观点的依据…（⌘/Ctrl+Enter 发送）"
+              rows={2}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </div>
+          <button className="primary" onClick={() => void sendNote()} disabled={sendingNote || !note.trim()}>
+            {sendingNote ? '发送中…' : '插话'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
