@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "smoke": "tsx src/smoke.ts"
+    "smoke": "tsx src/smoke.ts",
+    "mcp": "tsx src/mcp/server.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

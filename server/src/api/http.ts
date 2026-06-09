@@ -141,6 +141,19 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
   const agendaDrafts = new Map<string, AgendaDraftRecord>()
   router.use(express.json({ limit: '80mb' }))
 
+  // Opt-in bearer-token auth: only enforced when MEETING_API_TOKEN is set, so
+  // default local use (and the bundled web UI) is unaffected. Enable it when
+  // exposing the API to agents/headless callers over a shared port.
+  const apiToken = process.env.MEETING_API_TOKEN
+  if (apiToken) {
+    router.use((req, res, next) => {
+      const header = req.header('authorization') ?? ''
+      const provided = header.startsWith('Bearer ') ? header.slice(7) : (req.header('x-api-token') ?? '')
+      if (provided === apiToken) return next()
+      return res.status(401).json({ error: 'unauthorized: missing or invalid API token' })
+    })
+  }
+
   router.post('/meetings/agenda-draft', async (req, res) => {
     try {
       const body = req.body as Partial<CreateMeetingInput> & {
