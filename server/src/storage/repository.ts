@@ -57,6 +57,7 @@ export interface MeetingArtifactRow {
   archive_dir: string
   summary_path: string
   json_path: string
+  structured_json: string
   created_at: number
 }
 
@@ -178,10 +179,10 @@ export const meetingMessages = {
 }
 
 export const meetingArtifacts = {
-  upsert(meetingId: string, finalSummary: string, archiveDir: string, summaryPath: string, jsonPath: string): void {
+  upsert(meetingId: string, finalSummary: string, archiveDir: string, summaryPath: string, jsonPath: string, structuredJson = ''): void {
     db.prepare(
-      'INSERT OR REPLACE INTO meeting_artifacts (meeting_id, final_summary, archive_dir, summary_path, json_path, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(meetingId, finalSummary, archiveDir, summaryPath, jsonPath, Date.now())
+      'INSERT OR REPLACE INTO meeting_artifacts (meeting_id, final_summary, archive_dir, summary_path, json_path, structured_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(meetingId, finalSummary, archiveDir, summaryPath, jsonPath, structuredJson, Date.now())
   },
 
   get(meetingId: string): MeetingArtifactRow | undefined {

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MODEL_META, type MeetingModelName } from '../lib/models.ts'
-import { useMeetingSocket, type MeetingLogEntry, type MeetingMessageStream } from '../hooks/useMeetingSocket.ts'
+import { useMeetingSocket, type MeetingLogEntry, type MeetingMessageStream, type StructuredMinutes } from '../hooks/useMeetingSocket.ts'
 
 interface MeetingRow {
   id: string
@@ -42,10 +42,25 @@ interface Artifact {
   archive_dir: string
   summary_path: string
   json_path: string
+  structured_json?: string
+}
+
+function parseStructured(json: string | undefined): StructuredMinutes | null {
+  if (!json) return null
+  try {
+    const obj = JSON.parse(json) as Partial<StructuredMinutes>
+    return {
+      actionItems: Array.isArray(obj.actionItems) ? obj.actionItems : [],
+      openProblems: Array.isArray(obj.openProblems) ? obj.openProblems : [],
+    }
+  } catch {
+    return null
+  }
 }
 
 export default function MeetingView() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [meeting, setMeeting] = useState<MeetingRow | null>(null)
   const [agenda, setAgenda] = useState<AgendaRow[]>([])
   const [staticStreams, setStaticStreams] = useState<MeetingMessageStream[]>([])
@@ -112,6 +127,24 @@ export default function MeetingView() {
   const jsonPath = live.jsonPath || artifact?.json_path || meeting?.json_path || ''
   const archiveDir = live.archiveDir || artifact?.archive_dir || meeting?.archive_dir || ''
   const participants = meeting ? JSON.parse(meeting.participants_json) as MeetingModelName[] : []
+  const minutes = live.structuredMinutes ?? parseStructured(artifact?.structured_json)
+  const [continuing, setContinuing] = useState(false)
+
+  const continueMeeting = async () => {
+    if (!id || continuing) return
+    setContinuing(true)
+    setLocalError('')
+    try {
+      const res = await fetch(`/api/meetings/${id}/continue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      navigate(`/meetings/${data.id}`)
+    } catch (err) {
+      setLocalError(String(err instanceof Error ? err.message : err))
+    } finally {
+      setContinuing(false)
+    }
+  }
 
   const exportMd = () => {
     if (!id) return
@@ -247,6 +280,49 @@ export default function MeetingView() {
             {liveMode ? '会议仍在进行，最终纪要生成后会显示在这里。' : '暂无最终纪要。'}
           </p>
         )}
+
+        {minutes && (minutes.actionItems.length > 0 || minutes.openProblems.length > 0) && (
+          <div style={{ marginTop: '1.8rem', display: 'grid', gap: '1.4rem', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+            <div style={{ border: '1px solid var(--rule)', borderRadius: 6, padding: '1rem 1.1rem' }}>
+              <div className="byline" style={{ marginBottom: '0.7rem' }}>✅ 行动项（{minutes.actionItems.length}）</div>
+              {minutes.actionItems.length ? (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.7rem' }}>
+                  {minutes.actionItems.map((a, i) => (
+                    <li key={i} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
+                      <input type="checkbox" style={{ marginTop: '0.3rem' }} />
+                      <span>
+                        <strong>{a.task}</strong>
+                        <span className="byline" style={{ textTransform: 'none', letterSpacing: 0, display: 'block', marginTop: '0.2rem' }}>
+                          负责：{a.owner || '待定'}{a.due ? ` · 期限：${a.due}` : ''}{a.source ? ` · 来源：${a.source}` : ''}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="faint" style={{ fontStyle: 'italic' }}>本次会议没有抽取到明确行动项。</p>}
+            </div>
+
+            <div style={{ border: '1px solid var(--rule)', borderRadius: 6, padding: '1rem 1.1rem' }}>
+              <div className="byline" style={{ marginBottom: '0.7rem' }}>🧩 未解决 / 可续会的问题（{minutes.openProblems.length}）</div>
+              {minutes.openProblems.length ? (
+                <ul style={{ margin: 0, paddingLeft: '1.1rem', display: 'grid', gap: '0.6rem' }}>
+                  {minutes.openProblems.map((p, i) => (
+                    <li key={i}>
+                      <strong>{p.problem}</strong>
+                      {p.why && <span className="byline" style={{ textTransform: 'none', letterSpacing: 0, display: 'block', marginTop: '0.2rem' }}>仍未解决：{p.why}</span>}
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="faint" style={{ fontStyle: 'italic' }}>没有遗留问题，本次会议已收敛。</p>}
+              {minutes.openProblems.length > 0 && !running && (
+                <button className="primary" style={{ marginTop: '1rem' }} onClick={() => void continueMeeting()} disabled={continuing}>
+                  {continuing ? '正在开启续会…' : '带着这些问题继续开下一场 →'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <div style={{ marginTop: '1.4rem', display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
           <button className="primary" onClick={exportMd} disabled={!finalSummary}>导出 Markdown</button>
           {summaryPath && <span className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>summary: {summaryPath}</span>}

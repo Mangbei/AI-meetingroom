@@ -231,6 +231,41 @@ ${turns}
 `.trim()
 }
 
+export function minutesExtractionPrompt(args: {
+  ctx: MeetingContext
+  agendaSummaries: { question: string; summary: string }[]
+  finalSummary: string
+}): string {
+  const summaries = args.agendaSummaries
+    .map((s, i) => `## 议程 ${i + 1}: ${s.question}\n\n${s.summary}`)
+    .join('\n\n---\n\n')
+
+  return `
+你是本次会议的记录员。请只根据下面的讨论与纪要，抽取两类结构化信息，**严格输出 JSON，不要任何解释、不要 Markdown 代码块**。
+
+# 议程小结
+${summaries}
+
+# 最终纪要
+${args.finalSummary}
+
+请输出如下结构的 JSON：
+{
+  "actionItems": [
+    { "task": "具体要做的事，动词开头", "owner": "负责人或角色，未指定写\\"待定\\"", "due": "时间/期限，没有写空字符串", "source": "来自哪个议程或结论" }
+  ],
+  "openProblems": [
+    { "problem": "本次会议未能解决、分歧未收敛或证据不足、建议进入下一场会议继续讨论的问题", "why": "为什么仍未解决" }
+  ]
+}
+
+要求：
+- actionItems 只收录真正可执行的具体动作，不要把泛泛原则当行动项；没有就给空数组。
+- openProblems 只收录确实悬而未决、值得续会的问题；已经达成结论的不要放进来；没有就给空数组。
+- 只输出这个 JSON 对象本身。
+`.trim()
+}
+
 export function finalSummaryPrompt(args: {
   ctx: MeetingContext
   agendaSummaries: { question: string; summary: string }[]

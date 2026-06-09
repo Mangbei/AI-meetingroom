@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS meeting_artifacts (
   archive_dir TEXT NOT NULL,
   summary_path TEXT NOT NULL,
   json_path TEXT NOT NULL,
+  structured_json TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   FOREIGN KEY (meeting_id) REFERENCES meetings(id)
 );

@@ -13,6 +13,7 @@ import {
   meetings,
 } from '../storage/repository.js'
 import { runMeeting, addHumanNote, isMeetingRunning, type CreateMeetingInput, type MeetingEvent } from '../meeting/meeting.js'
+import { safeParseMinutes } from '../meeting/minutes.js'
 import { renderMeetingMarkdown } from '../meeting/archive.js'
 import {
   agendaDraftPrompt,
@@ -435,6 +436,83 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     const listeners = wsClients.get(id)
     if (listeners) for (const send of listeners) send({ type: 'human_note', meetingId: id, content: text })
     res.json({ ok: true })
+  })
+
+  // Carry-forward: open a follow-up meeting seeded with the unresolved problems
+  // from a finished meeting, plus a synthesized brief of the prior conclusions.
+  router.post('/meetings/:id/continue', async (req, res) => {
+    try {
+      const prior = meetings.get(req.params.id)
+      if (!prior) return res.status(404).json({ error: 'meeting not found' })
+
+      const artifact = meetingArtifacts.get(req.params.id)
+      const minutes = safeParseMinutes(artifact?.structured_json)
+      const bodyProblems = Array.isArray(req.body?.problems)
+        ? (req.body.problems as unknown[]).map(p => String(p ?? '').trim()).filter(Boolean)
+        : []
+      const problems = bodyProblems.length ? bodyProblems : minutes.openProblems.map(p => p.problem)
+      if (!problems.length) {
+        return res.status(400).json({ error: '本次会议没有标记为未解决的问题，无法自动续会' })
+      }
+
+      const agenda = problems.slice(0, 5)
+      const participants = JSON.parse(prior.participants_json) as MeetingModelName[]
+      let modelPostures: Record<string, string> = {}
+      try { modelPostures = JSON.parse(prior.model_postures_json) } catch { /* keep default */ }
+
+      const briefName = `上一场会议背景-${prior.title}.md`.replace(/[/\\]/g, '_').slice(0, 120)
+      const brief = [
+        `# 上一场会议背景：${prior.title}`,
+        '',
+        `## 上一场最终纪要`,
+        artifact?.final_summary || '（无最终纪要）',
+        '',
+        `## 待本次续会解决的未决问题`,
+        ...(minutes.openProblems.length
+          ? minutes.openProblems.map((p, i) => `${i + 1}. ${p.problem}${p.why ? `（仍未解决的原因：${p.why}）` : ''}`)
+          : agenda.map((q, i) => `${i + 1}. ${q}`)),
+      ].join('\n')
+
+      const id = uuid()
+      const title = `续会 · ${prior.title}`.slice(0, 200)
+      meetings.create({
+        id,
+        title,
+        goal: prior.goal,
+        mode: prior.mode,
+        agendaRounds: prior.agenda_rounds,
+        modelPostures,
+        participants,
+        moderator: prior.moderator,
+      })
+      meetingFiles.insert(id, briefName, 'md', brief, '')
+      agenda.forEach((question, position) => agendaItems.insert(id, position, question))
+
+      res.json({ id })
+
+      const input: CreateMeetingInput = {
+        title,
+        goal: prior.goal,
+        mode: prior.mode,
+        agendaRounds: prior.agenda_rounds,
+        modelPostures: modelPostures as CreateMeetingInput['modelPostures'],
+        participants,
+        moderator: prior.moderator,
+        agenda,
+        files: [{ filename: briefName, kind: 'md', content: brief }],
+      }
+      const emit = (event: MeetingEvent) => {
+        wsClients.get(id)?.forEach(fn => fn(event))
+      }
+      runMeeting(id, input, cdp, emit).catch(err => {
+        console.error('[meeting continue] fatal error:', err)
+        emit({ type: 'error', meetingId: id, error: String(err) })
+        meetings.setStatus(id, 'error')
+      })
+    } catch (err) {
+      console.error('[meeting continue] failed:', err)
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   router.post('/meetings/:id/messages/refetch', async (req, res) => {

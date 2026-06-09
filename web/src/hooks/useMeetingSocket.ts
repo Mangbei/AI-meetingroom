@@ -27,11 +27,29 @@ export interface HumanNote {
   at: number
 }
 
+export interface ActionItem {
+  task: string
+  owner: string
+  due: string
+  source: string
+}
+
+export interface OpenProblem {
+  problem: string
+  why: string
+}
+
+export interface StructuredMinutes {
+  actionItems: ActionItem[]
+  openProblems: OpenProblem[]
+}
+
 export interface MeetingLiveState {
   currentAgendaId: number | null
   streams: MeetingMessageStream[]
   agendaSummaries: Record<number, string>
   humanNotes: HumanNote[]
+  structuredMinutes: StructuredMinutes | null
   finalSummary: string
   archiveDir: string
   summaryPath: string
@@ -42,7 +60,7 @@ export interface MeetingLiveState {
 }
 
 interface MeetingEvent {
-  type: 'agenda_started' | 'turn_started' | 'delta' | 'message_complete' | 'model_status' | 'file_delivery' | 'agenda_summary' | 'final_summary' | 'human_note' | 'done' | 'error'
+  type: 'agenda_started' | 'turn_started' | 'delta' | 'message_complete' | 'model_status' | 'file_delivery' | 'agenda_summary' | 'final_summary' | 'structured_minutes' | 'human_note' | 'done' | 'error'
   meetingId: string
   agendaId?: number | null
   turnIndex?: number
@@ -57,6 +75,8 @@ interface MeetingEvent {
   archiveDir?: string
   summaryPath?: string
   jsonPath?: string
+  actionItems?: ActionItem[]
+  openProblems?: OpenProblem[]
 }
 
 const INITIAL: MeetingLiveState = {
@@ -64,6 +84,7 @@ const INITIAL: MeetingLiveState = {
   streams: [],
   agendaSummaries: {},
   humanNotes: [],
+  structuredMinutes: null,
   finalSummary: '',
   archiveDir: '',
   summaryPath: '',
@@ -130,6 +151,15 @@ function applyEvent(prev: MeetingLiveState, ev: MeetingEvent): MeetingLiveState 
   }
   if (ev.type === 'agenda_summary' && ev.agendaId != null) {
     return { ...prev, agendaSummaries: { ...prev.agendaSummaries, [ev.agendaId]: ev.content ?? '' } }
+  }
+  if (ev.type === 'structured_minutes') {
+    return {
+      ...prev,
+      structuredMinutes: {
+        actionItems: ev.actionItems ?? [],
+        openProblems: ev.openProblems ?? [],
+      },
+    }
   }
   if (ev.type === 'human_note') {
     return {

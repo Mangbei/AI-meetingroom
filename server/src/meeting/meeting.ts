@@ -10,10 +10,12 @@ import {
   agendaPrompt,
   agendaSummaryPrompt,
   finalSummaryPrompt,
+  minutesExtractionPrompt,
   type MeetingContext,
   type MeetingTurnInput,
   type ModelPostures,
 } from './prompts.js'
+import { parseStructuredMinutes, EMPTY_MINUTES, type StructuredMinutes } from './minutes.js'
 import { archiveMeeting } from './archive.js'
 import { notifyMeetingDone } from './notify.js'
 import type { UploadedMeetingFile } from './files.js'
@@ -29,6 +31,7 @@ export type MeetingEvent =
   | { type: 'file_delivery'; meetingId: string; model: MeetingModelName; filename?: string; status: 'trying' | 'uploaded' | 'fallback' | 'error'; method?: FileDeliveryMode; attempt?: number; detail?: string }
   | { type: 'agenda_summary'; meetingId: string; agendaId: number; agendaIndex: number; content: string }
   | { type: 'final_summary'; meetingId: string; content: string; archiveDir?: string; summaryPath?: string; jsonPath?: string }
+  | { type: 'structured_minutes'; meetingId: string; actionItems: StructuredMinutes['actionItems']; openProblems: StructuredMinutes['openProblems'] }
   | { type: 'human_note'; meetingId: string; agendaId?: number | null; content: string }
   | { type: 'done'; meetingId: string }
   | { type: 'error'; meetingId: string; agendaId?: number | null; model?: MeetingModelName; error: string }
@@ -415,8 +418,9 @@ async function runMeetingInner(
     question?: string
     turns?: MeetingTurnInput[]
     agendaSummaries?: { question: string; summary: string }[]
+    finalSummary?: string
     humanNotes?: string[]
-    role: 'agenda_summary' | 'final_summary'
+    role: 'agenda_summary' | 'final_summary' | 'minutes'
   }): Promise<{ model: MeetingModelName; content: string }> => {
     const candidates = [moderator, ...activeParticipants.filter(model => model !== moderator)]
       .filter(model => !failedModels.has(model) && adapters[model])
@@ -439,6 +443,12 @@ async function runMeetingInner(
                 question: args.question ?? '',
                 turns: args.turns ?? [],
                 humanNotes: args.humanNotes,
+              })
+            : args.role === 'minutes'
+            ? minutesExtractionPrompt({
+                ctx: ctxFor(model),
+                agendaSummaries: args.agendaSummaries ?? [],
+                finalSummary: args.finalSummary ?? '',
               })
             : finalSummaryPrompt({ ctx: ctxFor(model), agendaSummaries: args.agendaSummaries ?? [] }),
           emit,
@@ -522,6 +532,21 @@ async function runMeetingInner(
     agendaSummaries,
   })
 
+  // Extract structured action items + carry-forward problems from the minutes.
+  // Best-effort: a parse/model failure must not fail an otherwise-good meeting.
+  let structured: StructuredMinutes = { ...EMPTY_MINUTES }
+  try {
+    const { content: rawMinutes } = await runSummaryTurn({
+      agendaId: null,
+      role: 'minutes',
+      agendaSummaries,
+      finalSummary,
+    })
+    structured = parseStructuredMinutes(rawMinutes)
+  } catch (err) {
+    console.warn(`[meeting ${meetingId}] structured minutes extraction failed:`, err)
+  }
+
   const freshMeeting = meetings.get(meetingId)!
   const archive = archiveMeeting({
     meeting: freshMeeting,
@@ -530,10 +555,11 @@ async function runMeetingInner(
     messages: meetingMessages.listByMeeting(meetingId),
     finalSummary,
   })
-  meetingArtifacts.upsert(meetingId, finalSummary, archive.archiveDir, archive.summaryPath, archive.jsonPath)
+  meetingArtifacts.upsert(meetingId, finalSummary, archive.archiveDir, archive.summaryPath, archive.jsonPath, JSON.stringify(structured))
   meetings.setArchive(meetingId, archive.archiveDir, archive.summaryPath, archive.jsonPath)
   meetings.markDone(meetingId)
   emit({ type: 'final_summary', meetingId, content: finalSummary, ...archive })
+  emit({ type: 'structured_minutes', meetingId, actionItems: structured.actionItems, openProblems: structured.openProblems })
   emit({ type: 'done', meetingId })
   await cdp.openUrl(`${APP_ORIGIN}/meetings/${meetingId}`).catch(() => {})
   console.log(`[meeting ${meetingId}] done: ${archive.summaryPath}`)

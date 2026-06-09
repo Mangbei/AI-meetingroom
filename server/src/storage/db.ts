@@ -42,6 +42,12 @@ try {
   // Column already exists.
 }
 
+try {
+  _db.exec(`ALTER TABLE meeting_artifacts ADD COLUMN structured_json TEXT NOT NULL DEFAULT ''`)
+} catch {
+  // Column already exists.
+}
+
 // Any meeting stuck at 'pending'/'running' belongs to a previous server process.
 // Mark it as 'error' so the UI shows captured partial output.
 _db.exec(`UPDATE meetings SET status = 'error' WHERE status IN ('pending', 'running')`)
