@@ -1,13 +1,23 @@
 import express from 'express'
 import cors from 'cors'
 import http from 'http'
+import { existsSync } from 'fs'
+import { dirname, join, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { launchBrowser } from './browser/launcher.js'
 import { CDPSession } from './browser/cdp.js'
 import { attachWebSocket } from './api/ws.js'
 import { createRouter } from './api/http.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
-const APP_URL = process.env.APP_URL ?? 'http://localhost:5173/meetings/new'
+
+// In a packaged / production run the server also serves the built web UI, so
+// the whole app lives on one port. In dev the UI is served by Vite (5173),
+// which proxies /api and /ws back here.
+const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist')
+const SERVE_WEB = existsSync(join(WEB_DIST, 'index.html'))
+const APP_URL = process.env.APP_URL
+  ?? (SERVE_WEB ? `http://localhost:${PORT}/meetings/new` : 'http://localhost:5173/meetings/new')
 
 async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
@@ -66,8 +76,19 @@ async function main() {
   const wsClients = attachWebSocket(server)
   app.use('/api', createRouter(cdp, wsClients))
 
+  // Serve the built web UI (single-port production). The SPA fallback returns
+  // index.html for client-side routes, but never for /api or /ws.
+  if (SERVE_WEB) {
+    app.use(express.static(WEB_DIST))
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next()
+      res.sendFile(join(WEB_DIST, 'index.html'))
+    })
+    console.log(`[server] Serving web UI from ${WEB_DIST}`)
+  }
+
   server.listen(PORT, () => {
-    console.log(`[server] API listening on http://localhost:${PORT}`)
+    console.log(`[server] Listening on http://localhost:${PORT}${SERVE_WEB ? ' (UI + API)' : ' (API only; run the web dev server for the UI)'}`)
     console.log(`[server] WebSocket on ws://localhost:${PORT}/ws/meetings/:id`)
     openAppInControlledBrowser(cdp).catch(err => {
       console.warn('[server] Failed to open app in controlled browser:', err)

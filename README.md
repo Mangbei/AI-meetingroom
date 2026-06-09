@@ -58,22 +58,40 @@ Demo 已跑通: 可以在受控 Chrome 中驱动 ChatGPT、Gemini、DeepSeek 网
 
 ## 启动
 
-```powershell
-cd C:\Users\28574\Desktop\making-debate
-npm.cmd install
-npm.cmd run dev
+**普通用户（一键启动）**：详见 [INSTALL.md](INSTALL.md)。
+- macOS：双击 `start-mac.command`
+- Windows：双击 `start-windows.bat`
+
+首次会自动安装依赖、构建界面并启动；之后直接启动。程序在 `http://localhost:3001` 同时提供界面与接口。
+
+**开发者**：
+
+```bash
+npm install     # 安装依赖
+npm run dev     # 后端(3001) + Vite 前端(5173, 热更新)
+npm run build   # 构建前端到 web/dist
+npm start       # 生产模式：后端在 3001 同时托管前端
 ```
 
-然后访问:
+前置依赖：Node.js ≥ 22.5、已安装 Chrome / Edge / Chromium。
+
+## 目录结构
 
 ```text
-http://localhost:5173/meetings/new
-```
-
-后端运行在:
-
-```text
-http://localhost:3001
+ai-meetingroom/
+├── start-mac.command       # macOS 一键启动
+├── start-windows.bat       # Windows 一键启动
+├── INSTALL.md              # 安装与使用说明
+├── docs/MEETING_API.md     # REST / MCP 接口文档（给 agent 用）
+├── server/                 # 后端：Express + Playwright(CDP) + node:sqlite
+│   └── src/
+│       ├── index.ts            # 入口：启动浏览器、托管界面与接口
+│       ├── api/                # http 路由 + websocket
+│       ├── browser/            # 浏览器连接与各 AI 站点适配器
+│       ├── meeting/            # 会议流程、提示词、文件解析、纪要抽取
+│       ├── mcp/                # 给 Claude Code / Codex 用的 MCP server
+│       └── storage/            # 数据库与数据访问
+└── web/                    # 前端：React + Vite（构建产物 web/dist 由后端托管）
 ```
 
 ## 浏览器策略

@@ -99,7 +99,10 @@ export function useMeetingSocket(meetingId: string | undefined, liveMode: boolea
 
   useEffect(() => {
     if (!meetingId || !liveMode) return
-    const ws = new WebSocket(`ws://localhost:3001/ws/meetings/${meetingId}`)
+    // Derive from the page origin: in dev Vite (5173) proxies /ws to the API
+    // server; in production the API server serves the UI on the same origin.
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${wsProto}://${location.host}/ws/meetings/${meetingId}`)
     ws.onmessage = ev => setState(prev => applyEvent(prev, JSON.parse(ev.data)))
     ws.onerror = () => setState(prev => ({ ...prev, error: 'WebSocket connection error' }))
     return () => ws.close()
