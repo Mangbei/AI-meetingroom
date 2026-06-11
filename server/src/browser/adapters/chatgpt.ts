@@ -1,6 +1,7 @@
 import { Page } from 'playwright'
 import { SiteAdapter, PreflightResult, waitFor, streamUntilComplete } from './base.js'
 import { htmlToMarkdown } from '../markdown.js'
+import { maybeBringToFront } from '../foreground.js'
 
 // All ChatGPT selectors — update here if UI changes
 const SEL = {
@@ -29,7 +30,7 @@ export class ChatGPTAdapter implements SiteAdapter {
   }
 
   async focus(): Promise<void> {
-    await this.page.bringToFront().catch(() => {})
+    await maybeBringToFront(this.page)
   }
 
   async ensureReady(): Promise<void> {

@@ -1,4 +1,5 @@
 import { Page } from 'playwright'
+import { maybeBringToFront } from '../foreground.js'
 import { SiteAdapter, PreflightResult, waitFor, streamUntilComplete } from './base.js'
 import { htmlToMarkdown } from '../markdown.js'
 
@@ -42,7 +43,7 @@ export class GenericWebChatAdapter implements SiteAdapter {
   }
 
   async focus(): Promise<void> {
-    await this.page.bringToFront().catch(() => {})
+    await maybeBringToFront(this.page)
   }
 
   async ensureReady(): Promise<void> {

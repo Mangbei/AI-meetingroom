@@ -1,4 +1,5 @@
 import { Page } from 'playwright'
+import { maybeBringToFront } from '../foreground.js'
 import { GeminiConfig, PreflightResult, RuntimeStatus, SiteAdapter, waitFor, streamUntilComplete } from './base.js'
 
 const SEL = {
@@ -56,7 +57,7 @@ export class GeminiAdapter implements SiteAdapter {
   }
 
   async focus(): Promise<void> {
-    await this.page.bringToFront().catch(() => {})
+    await maybeBringToFront(this.page)
   }
 
   async ensureReady(): Promise<void> {

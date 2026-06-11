@@ -1,5 +1,6 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import { SITE_CONNECT, ALL_MODELS, type SiteConnect, type MeetingModelName } from './adapters/sites.js'
+import { maybeBringToFront } from './foreground.js'
 
 // Site connection details now live in one place (adapters/sites.ts) so the CDP
 // layer and the adapter registry can never drift apart on which models exist.
@@ -48,14 +49,14 @@ export class CDPSession {
         if (page.url() !== url) {
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {})
         }
-        await page.bringToFront().catch(() => {})
+        await maybeBringToFront(page)
         return page.url()
       }
     }
 
     const page = await this.context.newPage()
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 })
-    await page.bringToFront().catch(() => {})
+    await maybeBringToFront(page)
     return page.url()
   }
 
@@ -63,7 +64,7 @@ export class CDPSession {
     const opened = {} as Record<SiteName, string>
     for (const site of sites) {
       const page = await this.ensurePage(site)
-      await page.bringToFront().catch(() => {})
+      await maybeBringToFront(page)
       opened[site] = page.url()
     }
     return opened
