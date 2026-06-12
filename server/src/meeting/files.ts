@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'fs'
 import { dirname, extname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { extractText, type MeetingFileKind } from './file-extractors.js'
+import { extractText, SCANNED_PDF_NOTE, type MeetingFileKind } from './file-extractors.js'
 
 export type { MeetingFileKind } from './file-extractors.js'
 
@@ -20,6 +20,9 @@ export interface PreparedMeetingFile {
   content: string
   originalPath: string
   size: number
+  // Set when the text fallback is unreliable (scanned PDF, empty extraction);
+  // the original file is still attached, but the UI can warn the user.
+  extractionWarning?: string
 }
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -124,9 +127,18 @@ export async function prepareMeetingFiles(meetingId: string, files: UploadedMeet
     writeFileSync(originalPath, buffer)
 
     const extracted = await extractText(kind, buffer, file.filename)
-    const content = extracted.trim()
-      ? extracted
-      : `[未能从 ${file.filename} 抽取到文字。该文件可能是扫描版 PDF 或图片型文档；本版会优先尝试把原文件直接上传给 AI。]`
+    const trimmed = extracted.trim()
+    let content: string
+    let extractionWarning: string | undefined
+    if (!trimmed) {
+      content = `[未能从 ${file.filename} 抽取到文字。该文件可能是扫描版 PDF 或图片型文档；本版会优先尝试把原文件直接上传给 AI。]`
+      extractionWarning = `「${file.filename}」未能提取到文字，已优先直传原文件给 AI 识别。`
+    } else {
+      content = extracted
+      if (extracted === SCANNED_PDF_NOTE) {
+        extractionWarning = `「${file.filename}」疑似扫描件/图片型 PDF，本地无法提取文字，已优先直传原文件由 AI 识别。`
+      }
+    }
 
     prepared.push({
       filename: file.filename,
@@ -134,6 +146,7 @@ export async function prepareMeetingFiles(meetingId: string, files: UploadedMeet
       content,
       originalPath,
       size: buffer.length,
+      extractionWarning,
     })
   }
   return prepared

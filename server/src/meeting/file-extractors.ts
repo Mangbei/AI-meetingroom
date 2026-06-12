@@ -83,11 +83,20 @@ function cap(text: string): string {
   return `${text.slice(0, MAX_EXTRACT_CHARS)}\n\n[内容过长，已截断至前 ${MAX_EXTRACT_CHARS} 字；完整内容以原文件为准。]`
 }
 
+// Returned for a PDF that has pages but essentially no extractable text — i.e.
+// a scanned/image PDF. The note tells the model to rely on the attached
+// original (the web AIs can OCR it) and NOT to fabricate content.
+export const SCANNED_PDF_NOTE = '[此 PDF 可能是扫描件或图片型文档，本地未能提取到文字。请以聊天窗口中附上的原文件为准；如果没有附件或打不开，请明确说明你无法读取该文件，不要臆测其内容。]'
+
 async function extractPdf(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({ data: buffer })
   try {
     const result = await parser.getText()
-    return normalizeText(result.text)
+    const text = normalizeText(result.text)
+    // Detect scanned/image PDFs by near-zero extractable text rather than by
+    // page count, so a legitimately short one-page text PDF is NOT flagged.
+    if (text.replace(/\s/g, '').length < 10) return SCANNED_PDF_NOTE
+    return text
   } finally {
     await parser.destroy()
   }
@@ -135,14 +144,18 @@ function worksheetToMarkdown(name: string, sheet: XLSX.WorkSheet): string {
   const [first, ...rest] = normalized
   const header = first.map((cell, index) => cell || `Column ${index + 1}`)
   const divider = header.map(() => '---')
+  const dataRows = Math.max(rows.length - 1, 0)
   const lines = [
     `## Sheet: ${name}`,
+    // An explicit schema line preserves the column/row structure even after the
+    // table is flattened to markdown, so the model keeps the semantic relations.
+    `*列：${header.join('、')}｜数据行数：${dataRows}*`,
     '',
     `| ${header.join(' | ')} |`,
     `| ${divider.join(' | ')} |`,
     ...rest.map(row => `| ${row.join(' | ')} |`),
   ]
-  if (rows.length > limitedRows.length) lines.push('', `[已截取前 ${limitedRows.length} 行，共 ${rows.length} 行。]`)
+  if (rows.length > limitedRows.length) lines.push('', `[已截取前 ${limitedRows.length} 行，共 ${rows.length} 行；完整数据以聊天窗口中附上的原表格为准。]`)
   return lines.join('\n')
 }
 

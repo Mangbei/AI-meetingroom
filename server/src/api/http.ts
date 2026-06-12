@@ -238,6 +238,11 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
         agenda = parseAgendaDraft(raw, goal, seedAgenda)
       }
 
+      // Surface any file-extraction warnings (scanned PDF / empty text) so the
+      // user sees them on the review page before the meeting starts.
+      const fileWarnings = preparedFiles.map(f => f.extractionWarning).filter((w): w is string => !!w)
+      const combinedWarning = [warning, ...fileWarnings].filter(Boolean).join('\n')
+
       agendaDrafts.set(draftId, {
         id: draftId,
         title,
@@ -250,10 +255,10 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
         preparedFiles,
         suggestedAgenda: agenda,
         raw,
-        warning,
+        warning: combinedWarning,
         createdAt: Date.now(),
       })
-      res.json({ draftId, agenda, raw, warning })
+      res.json({ draftId, agenda, raw, warning: combinedWarning })
     } catch (err) {
       console.error('[agenda draft] failed:', err)
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
@@ -383,6 +388,12 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
       const preparedFiles = await prepareMeetingFiles(id, files)
       meetings.create({ id, title, goal, mode, agendaRounds, modelPostures, participants, moderator })
       preparedFiles.forEach(file => meetingFiles.insert(id, file.filename, file.kind, file.content, file.originalPath))
+      // Log file-extraction warnings (scanned PDF / empty text) into the run console.
+      preparedFiles.forEach(file => {
+        if (file.extractionWarning) {
+          meetingLogs.insert({ meetingId: id, kind: 'file_delivery', filename: file.filename, status: 'warning', detail: file.extractionWarning })
+        }
+      })
       agenda.forEach((question, position) => agendaItems.insert(id, position, question))
 
       res.json({ id })
