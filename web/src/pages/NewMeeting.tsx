@@ -137,6 +137,7 @@ export default function NewMeeting() {
   const [participants, setParticipants] = useState<MeetingModelName[]>([...DEFAULT_PARTICIPANTS])
   const [moderator, setModerator] = useState<MeetingModelName>('chatgpt')
   const [agenda, setAgenda] = useState<string[]>([''])
+  const [useProvidedAgenda, setUseProvidedAgenda] = useState(false)
   const [files, setFiles] = useState<UploadFile[]>([])
   const [modelPostures, setModelPostures] = useState<Record<MeetingModelName, ModelPosture>>(
     Object.fromEntries(MEETING_MODELS.map(m => [m, 'balanced'])) as Record<MeetingModelName, ModelPosture>,
@@ -292,6 +293,7 @@ export default function NewMeeting() {
           participants,
           moderator,
           agenda: agenda.map(q => q.trim()).filter(Boolean),
+          useProvidedAgenda,
           files: uploadPayload,
           modelPostures: Object.fromEntries(participants.map(model => [model, modelPostures[model]])),
           confirmations,
@@ -385,6 +387,21 @@ export default function NewMeeting() {
             </div>
           ))}
           <button type="button" className="ghost" onClick={() => setAgenda(prev => [...prev, ''])}>添加参考议程</button>
+
+          <label style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', marginTop: '1rem', cursor: 'pointer', fontWeight: 'normal' }}>
+            <input
+              type="checkbox"
+              checked={useProvidedAgenda}
+              onChange={e => setUseProvidedAgenda(e.target.checked)}
+              style={{ marginTop: '0.25rem' }}
+            />
+            <span>
+              直接使用我填写的议程（跳过主持人 AI 重拟）
+              <span className="byline" style={{ textTransform: 'none', letterSpacing: 0, display: 'block', marginTop: '0.2rem' }}>
+                勾选后，将以上面填写的议程原样进入下一步；不勾选则由主持人参考它重新拟定。两种情况都能在下一页微调。
+              </span>
+            </span>
+          </label>
         </section>
 
         <section style={{ margin: '2rem 0', paddingTop: '1.2rem', borderTop: '1px solid var(--rule)' }}>

@@ -213,23 +213,31 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
       }
 
       const prompt = agendaDraftPrompt({ ctx, seedAgenda })
+      const useProvidedAgenda = (req.body as { useProvidedAgenda?: boolean }).useProvidedAgenda === true
       let raw = ''
       let warning = ''
-      try {
-        const page = await cdp.ensurePage(moderator)
-        const adapter = ADAPTER_REGISTRY[moderator].ctor()
-        adapter.setPage(page)
-        await adapter.ensureReady()
-        await adapter.newConversation()
-        if (adapter.configure) await adapter.configure(DEFAULT_MEETING_MODEL_CONFIGS[moderator] as ModelConfig)
-        await adapter.focus?.()
-        await adapter.sendMessage(prompt)
-        raw = await adapter.streamResponse(() => {})
-      } catch (err) {
-        warning = `主持人网页生成议程失败，已使用本地保底议程：${err instanceof Error ? err.message : String(err)}`
+      let agenda: string[]
+      if (useProvidedAgenda && seedAgenda.length) {
+        // User opted to use their own agenda verbatim — skip the moderator
+        // re-draft entirely. They can still tweak it on the review page.
+        agenda = seedAgenda.slice(0, 5)
+      } else {
+        try {
+          const page = await cdp.ensurePage(moderator)
+          const adapter = ADAPTER_REGISTRY[moderator].ctor()
+          adapter.setPage(page)
+          await adapter.ensureReady()
+          await adapter.newConversation()
+          if (adapter.configure) await adapter.configure(DEFAULT_MEETING_MODEL_CONFIGS[moderator] as ModelConfig)
+          await adapter.focus?.()
+          await adapter.sendMessage(prompt)
+          raw = await adapter.streamResponse(() => {})
+        } catch (err) {
+          warning = `主持人网页生成议程失败，已使用本地保底议程：${err instanceof Error ? err.message : String(err)}`
+        }
+        agenda = parseAgendaDraft(raw, goal, seedAgenda)
       }
 
-      const agenda = parseAgendaDraft(raw, goal, seedAgenda)
       agendaDrafts.set(draftId, {
         id: draftId,
         title,
