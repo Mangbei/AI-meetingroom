@@ -51,13 +51,13 @@ if not exist "node_modules" (
   if errorlevel 1 ( echo [Error] npm install failed. & pause & exit /b 1 )
 )
 
-REM --- 4. Build the web UI if not built yet -----------------------------------
-if not exist "web\dist\index.html" (
-  echo.
-  echo [2/2] Building the web UI...
-  call npm run build
-  if errorlevel 1 ( echo [Error] UI build failed. & pause & exit /b 1 )
-)
+REM --- 4. Build the web UI ----------------------------------------------------
+REM Always rebuild: web\dist is git-ignored, so after pulling new code the old
+REM build would otherwise be served. The build is quick.
+echo.
+echo [2/2] Building the web UI (ensuring it matches the latest code)...
+call npm run build
+if errorlevel 1 ( echo [Error] UI build failed. & pause & exit /b 1 )
 
 REM --- 5. Start ----------------------------------------------------------------
 echo.

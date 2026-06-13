@@ -46,12 +46,12 @@ if [ ! -d "node_modules" ]; then
   npm install || { echo "[错误] 依赖安装失败。"; read -r -p "按回车键退出..." _; exit 1; }
 fi
 
-# --- 4. Build the web UI if not built yet -------------------------------------
-if [ ! -f "web/dist/index.html" ]; then
-  echo
-  echo "[2/2] 正在构建网页界面..."
-  npm run build || { echo "[错误] 界面构建失败。"; read -r -p "按回车键退出..." _; exit 1; }
-fi
+# --- 4. Build the web UI -------------------------------------------------------
+# Always rebuild: web/dist is git-ignored, so after pulling new code the old
+# build would otherwise be served. The build is quick.
+echo
+echo "[2/2] 正在构建网页界面（确保使用最新代码）..."
+npm run build || { echo "[错误] 界面构建失败。"; read -r -p "按回车键退出..." _; exit 1; }
 
 # --- 5. Start ------------------------------------------------------------------
 echo
