@@ -146,27 +146,18 @@ export default function MeetingView() {
     }
   }
 
-  const exportMd = async () => {
+  const exportMd = () => {
     if (!id) return
     const filename = `meeting-${id.slice(0, 8)}.md`
-    setLocalError('')
-    try {
-      // Fetch as a blob and save it. More reliable across browsers (Safari/Arc)
-      // than pointing an <a download> straight at the API URL.
-      const res = await fetch(`/api/meetings/${id}/export/${filename}`)
-      if (!res.ok) throw new Error(`导出失败（${res.status}）`)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch (err) {
-      setLocalError(String(err instanceof Error ? err.message : err))
-    }
+    // Point straight at the server URL: its Content-Disposition header names the
+    // file reliably. A blob: URL relies solely on the download attribute, which
+    // Chrome was ignoring — saving the file as a random UUID with no .md.
+    const a = document.createElement('a')
+    a.href = `/api/meetings/${id}/export/${filename}`
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
   }
 
   const running = meeting?.status === 'running'
@@ -336,7 +327,7 @@ export default function MeetingView() {
         )}
 
         <div style={{ marginTop: '1.4rem', display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
-          <button className="primary" onClick={() => void exportMd()} disabled={!finalSummary && meeting?.status !== 'done'}>导出 Markdown</button>
+          <button className="primary" onClick={exportMd} disabled={!finalSummary && meeting?.status !== 'done'}>导出 Markdown</button>
           {summaryPath && <span className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>summary: {summaryPath}</span>}
           {jsonPath && <span className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>json: {jsonPath}</span>}
           {archiveDir && <span className="byline" style={{ textTransform: 'none', letterSpacing: 0 }}>archive: {archiveDir}</span>}
