@@ -106,7 +106,14 @@ curl -s http://localhost:3001/api/meetings                               # 期�
 | 腾讯元宝 | yuanbao.tencent.com | 通用 |
 | Kimi | kimi.com | 通用 |
 
-默认勾选 ChatGPT、Gemini、DeepSeek。开会前每家都会做页面结构自检（preflight）；**网站改版导致选择器失效**时该模型会被明确跳过，修复方法：更新 `server/src/browser/adapters/specs.ts`（通用适配器）或对应专用适配器文件，可用 `npm run smoke -- <模型名>` 单独验证。
+默认勾选 ChatGPT、Gemini、DeepSeek。开会前每家都会做页面结构自检（preflight）：适配器会跨主页面和 iframe 探测输入框、自动尝试备用入口 URL；仍失败时的报错会区分"疑似未登录"和"页面已改版"。
+
+**某家报"页面结构自检失败"时的排查步骤：**
+
+1. 确认已在受控浏览器中登录该网站（报错里若写"疑似未登录"就是这个原因）。
+2. 保持程序运行，另开终端执行 `npm run inspect -w server -- <模型名>`（如 `zhipu`，或 `all` 抓全部）——它会把该站真实的输入框/按钮 DOM 结构打印出来。
+3. 把输出贴给开发者或 AI，即可据此精准更新 `server/src/browser/adapters/specs.ts` 的选择器。
+4. 改完可用 `npm run smoke -- <模型名>` 发一条真实消息验证收发链路。
 
 ---
 

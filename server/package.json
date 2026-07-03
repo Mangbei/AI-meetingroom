@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "smoke": "tsx src/smoke.ts",
+    "inspect": "tsx src/inspect.ts",
     "mcp": "tsx src/mcp/server.ts"
   },
   "dependencies": {

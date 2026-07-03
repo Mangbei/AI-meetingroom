@@ -1,4 +1,4 @@
-import { Page } from 'playwright'
+import { Locator, Page } from 'playwright'
 import { maybeBringToFront } from '../foreground.js'
 import { SiteAdapter, PreflightResult, waitFor, streamUntilComplete } from './base.js'
 import { htmlToMarkdown } from '../markdown.js'
@@ -14,6 +14,8 @@ import { htmlToMarkdown } from '../markdown.js'
 export interface SiteSpec {
   name: string
   homeUrl: string
+  /** Extra URLs to try when homeUrl doesn't show a chat input (site moved). */
+  fallbackUrls?: string[]
   urlPrefixes: string[]
   inputBox: string
   /** Response bubble candidates, in order of preference; outermost-last is read. */
@@ -30,6 +32,15 @@ export interface SiteSpec {
   stableMs?: number
 }
 
+// Last-resort input candidates appended after the site's own selectors: any
+// visible editor-ish element. Chat UIs virtually always expose one of these.
+const GENERIC_INPUT_FALLBACK = 'div[contenteditable="true"], [role="textbox"], textarea'
+
+const LOGIN_WALL_SELECTOR = [
+  'button:has-text("登录")', 'a:has-text("登录")', 'button:has-text("登 录")',
+  'button:has-text("Log in")', 'button:has-text("Sign in")', 'a:has-text("Log in")',
+].join(', ')
+
 export class GenericWebChatAdapter implements SiteAdapter {
   readonly name: string
   private page!: Page
@@ -44,6 +55,42 @@ export class GenericWebChatAdapter implements SiteAdapter {
 
   async focus(): Promise<void> {
     await maybeBringToFront(this.page)
+  }
+
+  /**
+   * Find the chat input across the main page AND child iframes (Playwright
+   * locators don't pierce iframes, so a fixed main-frame selector misses
+   * inputs rendered inside one). Tries the site's own selectors first, then a
+   * generic editor fallback, polling until timeout so slow SPAs get a chance
+   * to render.
+   */
+  private async findInput(timeoutMs = 12_000): Promise<Locator | null> {
+    const selectors = [this.spec.inputBox, GENERIC_INPUT_FALLBACK]
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      for (const selector of selectors) {
+        for (const frame of this.page.frames()) {
+          const loc = frame.locator(selector).first()
+          if (await loc.isVisible().catch(() => false)) return loc
+        }
+      }
+      await waitFor(500)
+    }
+    return null
+  }
+
+  /** Make sure a chat input is on screen, trying fallback URLs if the primary
+   *  page doesn't show one (e.g. the site moved its chat path). */
+  private async ensureInputPresent(): Promise<Locator | null> {
+    let input = await this.findInput()
+    if (input) return input
+    for (const url of this.spec.fallbackUrls ?? []) {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => {})
+      await waitFor(1200)
+      input = await this.findInput(8_000)
+      if (input) return input
+    }
+    return null
   }
 
   async ensureReady(): Promise<void> {
@@ -68,7 +115,7 @@ export class GenericWebChatAdapter implements SiteAdapter {
       await this.page.goto(this.spec.homeUrl, { waitUntil: 'domcontentloaded' }).catch(() => {})
       await waitFor(800)
     }
-    await this.page.locator(this.spec.inputBox).first().waitFor({ timeout: 15_000 }).catch(() => {})
+    await this.ensureInputPresent()
   }
 
   async uploadFiles(filePaths: string[]): Promise<boolean> {
@@ -99,13 +146,20 @@ export class GenericWebChatAdapter implements SiteAdapter {
   }
 
   async sendMessage(text: string): Promise<void> {
-    const input = this.page.locator(this.spec.inputBox).first()
-    await input.waitFor({ timeout: 12_000 })
+    const input = await this.findInput()
+    if (!input) throw new Error(`${this.name}: 找不到输入框（当前页面 ${this.page.url()}）`)
     if (this.spec.inputMode === 'type') {
       await input.click()
       await this.page.keyboard.insertText(text)
     } else {
-      await input.fill(text)
+      // fill() works on both textarea and contenteditable; fall back to typing
+      // when a custom editor rejects it.
+      try {
+        await input.fill(text)
+      } catch {
+        await input.click()
+        await this.page.keyboard.insertText(text)
+      }
     }
     await waitFor(300)
 
@@ -155,9 +209,19 @@ export class GenericWebChatAdapter implements SiteAdapter {
   }
 
   async preflight(): Promise<PreflightResult> {
-    const missing: string[] = []
-    if (!(await this.page.locator(this.spec.inputBox).first().count().catch(() => 0))) missing.push('inputBox')
-    return { ok: missing.length === 0, missing }
+    // newConversation already tried hard (incl. fallback URLs); a short
+    // confirmation pass is enough here.
+    const input = await this.findInput(4_000)
+    if (input) return { ok: true, missing: [] }
+
+    // Enrich the failure so the user can tell "not logged in / wrong page"
+    // apart from "site redesigned, selectors stale".
+    const url = this.page.url()
+    const loginWall = await this.page.locator(LOGIN_WALL_SELECTOR).first().isVisible().catch(() => false)
+    const hint = loginWall
+      ? `页面上有登录按钮，疑似未登录。请在受控浏览器中登录 ${this.name} 后重试`
+      : `当前页面 ${url}，未发现任何输入框。可运行 npm run inspect -w server -- ${this.name} 抓取页面结构`
+    return { ok: false, missing: [`inputBox（${hint}）`] }
   }
 
   async streamResponse(onDelta: (chunk: string) => void): Promise<string> {

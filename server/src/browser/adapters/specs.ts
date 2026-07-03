@@ -42,6 +42,8 @@ export const DOUBAO_SPEC: SiteSpec = {
 export const ZHIPU_SPEC: SiteSpec = {
   name: 'zhipu',
   homeUrl: 'https://chatglm.cn/main/alltoolsdetail',
+  // 智谱清言改版较频繁；主路径找不到输入框时依次尝试这些入口。
+  fallbackUrls: ['https://chatglm.cn/main/guest', 'https://chatglm.cn/'],
   urlPrefixes: ['https://chatglm.cn'],
   inputBox: 'textarea, div[contenteditable="true"]',
   // 清言 send control is an icon button; fall back to Enter when not matched.
@@ -55,6 +57,7 @@ export const ZHIPU_SPEC: SiteSpec = {
 export const QWEN_SPEC: SiteSpec = {
   name: 'qwen',
   homeUrl: 'https://chat.qwen.ai/',
+  fallbackUrls: ['https://www.tongyi.com/'],
   urlPrefixes: ['https://chat.qwen.ai', 'https://tongyi.aliyun.com', 'https://www.tongyi.com'],
   inputBox: 'textarea#chat-input, textarea, div[contenteditable="true"]',
   sendButton: '#send-message-button, button[class*="send"], button[aria-label*="发送"]',
@@ -80,6 +83,7 @@ export const YUANBAO_SPEC: SiteSpec = {
 export const KIMI_SPEC: SiteSpec = {
   name: 'kimi',
   homeUrl: 'https://www.kimi.com/',
+  fallbackUrls: ['https://kimi.moonshot.cn/'],
   urlPrefixes: ['https://www.kimi.com', 'https://kimi.moonshot.cn'],
   inputBox: '.chat-input-editor, div[contenteditable="true"], textarea',
   inputMode: 'type',
