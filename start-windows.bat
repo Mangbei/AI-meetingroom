@@ -29,18 +29,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM --- 2. Chrome check (the app drives your installed Chrome) -----------------
-if not exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
-  if not exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" (
-    if not exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" (
-      echo.
-      echo [Note] Google Chrome was not found in the usual locations.
-      echo This app needs Chrome or Edge to drive the web AIs. Install Chrome:
-      echo https://www.google.com/chrome/
-      echo.
-      pause
-    )
-  )
+REM --- 2. Browser check (the app drives your installed Chrome or Edge) --------
+set "BROWSER_FOUND="
+if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set "BROWSER_FOUND=1"
+if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" set "BROWSER_FOUND=1"
+if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "BROWSER_FOUND=1"
+if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set "BROWSER_FOUND=1"
+if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" set "BROWSER_FOUND=1"
+if not defined BROWSER_FOUND (
+  echo.
+  echo [Note] Chrome / Edge was not found in the usual locations.
+  echo This app needs one of them to drive the web AIs. Install Chrome:
+  echo https://www.google.com/chrome/
+  echo.
+  pause
 )
 
 REM --- 3. Install dependencies on first run -----------------------------------

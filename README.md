@@ -56,24 +56,26 @@ Demo 已跑通: 可以在受控 Chrome 中驱动 ChatGPT、Gemini、DeepSeek 网
 
 > 说明: ChatGPT / Gemini / DeepSeek 三家有针对性优化的专用适配器(含模型档位/深度思考等配置)。其余六家由统一的"通用适配器"驱动, 选择器为基于各站点结构的最佳推断。开会前会对每家做一次页面结构自检(preflight): 若某家网站改版导致关键元素缺失, 会以"页面结构自检失败"明确跳过该模型, 此时只需更新 `server/src/browser/adapters/specs.ts` 中对应站点的选择器即可。
 
-## 启动
+## 两种使用方式
 
-**普通用户（一键启动）**：详见 [INSTALL.md](INSTALL.md)。
-- macOS：双击 `start-mac.command`
-- Windows：双击 `start-windows.bat`
+同一套代码，两种入口，按需选择：
 
-首次会自动安装依赖、构建界面并启动；之后直接启动。程序在 `http://localhost:3001` 同时提供界面与接口。
+| 方式 | 适用人群 | 怎么用 |
+|---|---|---|
+| **① 一键启动（软件版）** | 普通用户 / 分发给别人 | macOS 双击 `start-mac.command`；Windows 双击 `start-windows.bat`。自动检查环境→装依赖→构建界面→启动，整个程序跑在 `http://localhost:3001` |
+| **② 开发模式** | 改代码时 | `npm install` 后 `npm run dev`：后端 3001 + Vite 前端 5173（热更新，改前端代码即时生效） |
 
-**开发者**：
+一键启动的详细步骤（含首次登录 AI、常见问题）见 [INSTALL.md](INSTALL.md)。
+
+前置依赖（两种方式相同）：Node.js ≥ 22.5、已安装 Chrome / Edge / Chromium。
+
+开发模式的其它命令：
 
 ```bash
-npm install     # 安装依赖
-npm run dev     # 后端(3001) + Vite 前端(5173, 热更新)
-npm run build   # 构建前端到 web/dist
-npm start       # 生产模式：后端在 3001 同时托管前端
+npm run build   # 构建前端到 web/dist（一键启动脚本每次会自动执行）
+npm start       # 手动以生产模式启动（等价于一键启动脚本的最后一步）
+npm run smoke -- chatgpt   # 单独测试某个模型的选择器是否还有效（网站改版排查用）
 ```
-
-前置依赖：Node.js ≥ 22.5、已安装 Chrome / Edge / Chromium。
 
 ## 目录结构
 

@@ -594,16 +594,6 @@ export function createRouter(cdp: CDPSession, wsClients: WsClients): Router {
     }
   })
 
-  router.post('/browser/open-app', async (req, res) => {
-    try {
-      const url = typeof req.body?.url === 'string' ? req.body.url : 'http://localhost:5173/meetings/new'
-      const opened = await cdp.openUrl(url)
-      res.json({ ok: true, opened })
-    } catch (err) {
-      res.status(500).json({ error: String(err) })
-    }
-  })
-
   router.get('/status', async (req, res) => {
     try {
       const models = typeof req.query.models === 'string'
