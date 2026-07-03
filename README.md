@@ -1,81 +1,126 @@
 # AI Meeting Room
 
-本地多模型会议室。它不使用官方 AI API, 而是驱动本机受控浏览器中已经登录的网页端模型, 让 ChatGPT、Gemini、DeepSeek 围绕上传资料和会议议程进行多轮讨论, 最后生成本地会议纪要。
+本地多模型会议室。**不使用任何 AI API Key**——它驱动你电脑上一个受控浏览器里**已登录的网页版 AI**（ChatGPT、Gemini、DeepSeek、Claude、豆包、智谱、千问、元宝、Kimi），让它们围绕你上传的资料和议程进行多轮讨论、互相质疑，最后生成结构化会议纪要（含行动项与未解决问题）。
 
-## 当前 Demo 状态
+架构一句话：**编排者中心的多智能体辩论系统 × 浏览器自动化（Playwright/CDP）当模型接入层**。模型间不直接通信，后端把材料、前序发言、分工姿态拼装成提示词逐轮转发，像真实会议一样推进：议程 → 多轮交锋 → 主持人小结 → 最终纪要。
 
-Demo 已跑通: 可以在受控 Chrome 中驱动 ChatGPT、Gemini、DeepSeek 网页端进行多轮会议式对话, 全程无需 API key。
+---
 
-当前文件链路:
+## 运行前提（必须提前装好的只有两样）
 
-- 前端支持上传 TXT、MD、PDF、Word、Excel、CSV。
-- 后端会把原文件保存到 `.local-data/meetings/<meeting-id>/uploads/`。
-- 会议开始时优先把原文件直传给每家网页端 AI。
-- 某家上传失败时最多尝试 2 次, 仍失败则自动使用后端抽取出的文本资料包兜底。
-- 扫描版 PDF/OCR 暂不作为首批目标。遇到无法抽字的图片型 PDF, 会保留提示并继续尝试原文件直传。
+| 前提 | 要求 | 检查命令 | 通过标准 |
+|---|---|---|---|
+| **Node.js** | ≥ 22.5（数据库用 Node 内置 `node:sqlite`，低版本起不来） | `node -v` | 输出 `v22.5.0` 或更高 |
+| **浏览器** | Chrome / Edge / Chromium 任一 | macOS 看 `/Applications/Google Chrome.app` 是否存在；Windows 一般自带 Edge | 存在即可 |
 
-## 核心能力
+其余一切（npm 依赖、前端构建）都由启动流程**自动完成**，唯一额外要求是**首次运行需要联网**（下载 npm 依赖）。
 
-- 使用网页端账号: ChatGPT Plus、Gemini Pro、DeepSeek 网页端。
-- 不需要 OpenAI / Google / DeepSeek API key。
-- 支持多资料上传: `.txt`、`.md`、`.pdf`、`.doc`、`.docx`、`.xls`、`.xlsx`、`.csv`。
-- 支持主持人先根据主题和附件自动拟定 3-5 个议程。
-- 支持人工确认页: 用户可以编辑、增删、排序议程后再开始会议。
-- 支持接力模式和并行模式。
-- 支持每个议程设置 1-5 轮讨论, 默认 2 轮。
-- 支持每个模型设置讨论姿态: 协作、默认、反骨。
-- 支持指定主持人 / 最终归纳者。
-- 支持人类主持人介入: 会议进行中可随时插话或追问, 内容会注入下一轮提示, 参会模型必须正面回应, 议程小结也会纳入这些插话。
-- 支持结构化纪要: 会议结束后自动抽取行动项(谁负责/做什么/期限/来源)和未解决问题, 在纪要页以清单呈现。
-- 支持难题结转续会: 把本场未解决的问题一键带入新会议, 携带上一场结论作为背景继续讨论。
-- 支持代码与笔记本上传: 除 PDF/Word/Excel/Markdown 外, 还接受 .py/.ipynb/.json 等源码与文本文件, Jupyter 笔记本会抽成干净的代码+说明。
-- 支持 API 与 MCP 接入: 既能手动用网页操作, 也能让 Claude Code / Codex 等 agent 通过 REST 或 MCP 工具拉起会议、插话、读结果。详见 [docs/MEETING_API.md](docs/MEETING_API.md)。
-- 支持运行控制台: 展示模型打开、准备、发言、错误、缺席, 以及文件直传/文本兜底状态。
-- 支持缺席机制: 选择 2 位以上模型, 开始后只要至少 2 位准备成功即可继续。
-- 支持模型分工提示: 不同 AI 会被要求从结构化方案、资料综合、反方推理等不同角度发言。
-- 会议完成后保存本地 Markdown 和 JSON。
-- 支持 Windows 桌面通知。
+**没装会怎样（便于诊断）：**
+- 缺 Node / 版本过低 → 启动脚本直接提示并退出；手动运行则报 `node: command not found` 或 `Cannot find module 'node:sqlite'`。
+- 缺浏览器 → 服务启动时抛 `No Chrome/Chromium/Edge installation found`，可用环境变量 `BROWSER_BINARY` 指定非标准路径。
+- 没跑 `npm install` → 报 `Cannot find module 'express'` 之类；跑一次 `npm install` 即可。
+
+---
+
+## 快速开始
+
+### 方式① 一键启动（普通用户 / 分发给别人）
+
+- **macOS**：双击 `start-mac.command`（若提示"身份不明开发者"：右键 → 打开 → 打开）
+- **Windows**：双击 `start-windows.bat`（SmartScreen 提示时：更多信息 → 仍要运行）
+
+脚本自动完成：检查 Node 与浏览器 → 首次 `npm install` → 构建前端 → 启动。成功后整个程序运行在 **`http://localhost:3001`**（界面 + 接口同端口），并弹出受控浏览器。
+
+### 方式② 开发模式（改代码时）
+
+```bash
+npm install     # 首次
+npm run dev     # 后端 3001 + Vite 前端 5173（热更新）
+# 开发时访问 http://localhost:5173
+```
+
+### 方式③ 命令行 / AI agent 非交互拉起
+
+给自动化环境或 AI agent 的确定性步骤（等价于一键启动脚本做的事）：
+
+```bash
+# 0) 前提自检
+node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit((a>22||(a===22&&b>=5))?0:1)" \
+  || { echo "需要 Node >= 22.5"; exit 1; }
+
+# 1) 安装依赖（仓库不含 node_modules，首次必须执行，需联网）
+npm install
+
+# 2) 构建前端（生产模式由后端托管 web/dist；每次拉新代码后都要重新构建）
+npm run build
+
+# 3) 启动（会自动拉起受控浏览器；无图形环境见下方环境变量）
+npm start
+```
+
+**验证是否拉起成功：**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/            # 期望 200（界面）
+curl -s http://localhost:3001/api/meetings                               # 期望 JSON 数组
+```
+
+**常用环境变量：**
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `PORT` | 服务端口 | `3001` |
+| `BROWSER_BINARY` | 手动指定浏览器可执行文件路径 | 自动探测 Chrome→Chromium→Edge |
+| `BROWSER_CDP_PORT` | 连接一个**已在运行**的浏览器（需带 `--remote-debugging-port` 启动）而不是自己拉起 | 无（自己拉起） |
+| `OPEN_APP_IN_BROWSER` | 设为 `0` 则启动后不自动打开会议页 | 开 |
+| `MEETINGROOM_FOREGROUND` | 设为 `1` 时每轮把受控浏览器切到前台（调试用；默认后台静默运行，不抢焦点） | 关 |
+| `MEETING_API_TOKEN` | 设置后所有 `/api` 请求需带 `Authorization: Bearer <token>` | 不鉴权 |
+
+> 无图形环境（CI/容器）示例：先自行启动 `chromium --headless=new --remote-debugging-port=9333 --user-data-dir=/tmp/profile`，再 `BROWSER_CDP_PORT=9333 npm start`。注意：无头环境里没有登录态，只能验证服务本身，无法真正开会。
+
+---
+
+## 首次运行必做：登录 AI
+
+程序启动后会弹出一个**受控浏览器窗口**（独立配置，与你日常浏览器互不影响）：
+
+1. 在这个窗口里登录你要用的 AI 网站（登录、验证码、二次验证必须**人工完成**，程序不代登录）。登录态保存在 `.local-data/browser-profile/`，之后无需重登。
+2. 打开 `http://localhost:3001/meetings/new`，页面上可"检测登录状态"。
+3. 上传资料 → 填标题与目标 →（可选）填议程、勾选"直接使用我填写的议程"跳过 AI 重拟 → 选模式/轮数/参会模型/主持人 → 勾选各模型"最高档位确认" → 生成议程草案 → 人工确认页微调 → 开始会议。
+4. 至少 **2 个模型就绪**才能开会；未登录/自检失败的模型会被自动跳过。
+5. 会议进行中可在页面底部**插话**（注入下一轮，模型必须回应）；结束后可**导出 Markdown**、勾选行动项、或"带着未解决问题继续开下一场"。
+
+---
 
 ## 已接入模型
 
-可在新建会议页选择以下任意 2 位以上参会:
+| 模型 | 站点 | 适配器 |
+| --- | --- | --- |
+| ChatGPT | chatgpt.com | 专用（含模型档位配置） |
+| Gemini | gemini.google.com | 专用 |
+| DeepSeek | chat.deepseek.com | 专用（深度思考/联网开关） |
+| Claude | claude.ai | 通用 |
+| 豆包 | doubao.com | 通用 |
+| 智谱清言 | chatglm.cn | 通用 |
+| 通义千问 | chat.qwen.ai | 通用 |
+| 腾讯元宝 | yuanbao.tencent.com | 通用 |
+| Kimi | kimi.com | 通用 |
 
-| 模型 | 厂商 | 站点 | 适配器 |
-| --- | --- | --- | --- |
-| ChatGPT | OpenAI | chatgpt.com | 专用适配器 |
-| Gemini | Google | gemini.google.com | 专用适配器 |
-| DeepSeek | DeepSeek | chat.deepseek.com | 专用适配器 |
-| Claude | Anthropic | claude.ai | 通用适配器 |
-| 豆包 | 字节跳动 | doubao.com | 通用适配器 |
-| 智谱清言 | 智谱 AI | chatglm.cn | 通用适配器 |
-| 通义千问 | 阿里巴巴 | chat.qwen.ai | 通用适配器 |
-| 腾讯元宝 | 腾讯 | yuanbao.tencent.com | 通用适配器 |
-| Kimi | 月之暗面 | kimi.com | 通用适配器 |
+默认勾选 ChatGPT、Gemini、DeepSeek。开会前每家都会做页面结构自检（preflight）；**网站改版导致选择器失效**时该模型会被明确跳过，修复方法：更新 `server/src/browser/adapters/specs.ts`（通用适配器）或对应专用适配器文件，可用 `npm run smoke -- <模型名>` 单独验证。
 
-默认勾选 ChatGPT、Gemini、DeepSeek 三家; 其余几家在列表中同样可勾选。
+---
 
-> 说明: ChatGPT / Gemini / DeepSeek 三家有针对性优化的专用适配器(含模型档位/深度思考等配置)。其余六家由统一的"通用适配器"驱动, 选择器为基于各站点结构的最佳推断。开会前会对每家做一次页面结构自检(preflight): 若某家网站改版导致关键元素缺失, 会以"页面结构自检失败"明确跳过该模型, 此时只需更新 `server/src/browser/adapters/specs.ts` 中对应站点的选择器即可。
+## 核心能力
 
-## 两种使用方式
+- **会议编排**：接力/并行两种模式；每议程 1-5 轮；模型可设讨论姿态（协作/默认/反骨）；指定主持人负责拟议程、收束小结、最终归纳。
+- **人类主持人介入**：会议中随时插话/追问，注入下一轮提示，模型必须正面回应。
+- **结构化纪要**：自动抽取行动项（做什么/谁负责/期限/来源）与未解决问题；未决问题可**一键结转续会**。
+- **文件链路**：接受 PDF / Word / Excel / CSV / Markdown / 代码 / Jupyter 笔记本 / 任意文本文件；**优先把原文件直传给每家 AI**（失败重试 2 次），同时永远携带文本抽取兜底；自动识别 GBK 等中文编码；扫描件 PDF 会被检测并明确提示（靠 web AI 的视觉能力读原件，本地不做 OCR）。
+- **运行控制台**：实时展示每个模型打开/就绪/发言/出错/缺席，及文件直传/兜底状态。
+- **本地优先**：数据全部存本地（`node:sqlite` + 文件），完成后有桌面通知（macOS/Windows）。
+- **Agent 可控**：REST API + MCP server，Claude Code / Codex 可以创建会议、插话、读纪要、续会。见 [docs/MEETING_API.md](docs/MEETING_API.md)。
 
-同一套代码，两种入口，按需选择：
-
-| 方式 | 适用人群 | 怎么用 |
-|---|---|---|
-| **① 一键启动（软件版）** | 普通用户 / 分发给别人 | macOS 双击 `start-mac.command`；Windows 双击 `start-windows.bat`。自动检查环境→装依赖→构建界面→启动，整个程序跑在 `http://localhost:3001` |
-| **② 开发模式** | 改代码时 | `npm install` 后 `npm run dev`：后端 3001 + Vite 前端 5173（热更新，改前端代码即时生效） |
-
-一键启动的详细步骤（含首次登录 AI、常见问题）见 [INSTALL.md](INSTALL.md)。
-
-前置依赖（两种方式相同）：Node.js ≥ 22.5、已安装 Chrome / Edge / Chromium。
-
-开发模式的其它命令：
-
-```bash
-npm run build   # 构建前端到 web/dist（一键启动脚本每次会自动执行）
-npm start       # 手动以生产模式启动（等价于一键启动脚本的最后一步）
-npm run smoke -- chatgpt   # 单独测试某个模型的选择器是否还有效（网站改版排查用）
-```
+---
 
 ## 目录结构
 
@@ -83,71 +128,36 @@ npm run smoke -- chatgpt   # 单独测试某个模型的选择器是否还有效
 ai-meetingroom/
 ├── start-mac.command       # macOS 一键启动
 ├── start-windows.bat       # Windows 一键启动
-├── INSTALL.md              # 安装与使用说明
+├── INSTALL.md              # 面向最终用户的安装说明（含常见问题）
 ├── docs/MEETING_API.md     # REST / MCP 接口文档（给 agent 用）
 ├── server/                 # 后端：Express + Playwright(CDP) + node:sqlite
 │   └── src/
-│       ├── index.ts            # 入口：启动浏览器、托管界面与接口
-│       ├── api/                # http 路由 + websocket
-│       ├── browser/            # 浏览器连接与各 AI 站点适配器
-│       ├── meeting/            # 会议流程、提示词、文件解析、纪要抽取
-│       ├── mcp/                # 给 Claude Code / Codex 用的 MCP server
-│       └── storage/            # 数据库与数据访问
+│       ├── index.ts            # 入口：拉起/连接浏览器、托管界面与接口
+│       ├── api/                # http 路由 + websocket 实时流
+│       ├── browser/            # 浏览器启动/CDP 连接 + 各 AI 站点适配器
+│       ├── meeting/            # 会议状态机、提示词、文件解析、纪要抽取
+│       ├── mcp/                # MCP server（stdio，零依赖）
+│       └── storage/            # node:sqlite 数据库
 └── web/                    # 前端：React + Vite（构建产物 web/dist 由后端托管）
 ```
 
-## 浏览器策略
+## 数据与输出位置
 
-后端自动化浏览器会按这个顺序查找:
-
-```text
-Google Chrome -> Chromium -> Microsoft Edge
-```
-
-所以在你的电脑上会优先打开 Chrome。如果某台电脑没有 Chrome, 才会 fallback 到 Chromium 或 Edge。启动日志会显示实际使用的浏览器和路径。
-
-也可以手动指定:
-
-```powershell
-$env:BROWSER_BINARY="C:\Program Files\Google\Chrome\Application\chrome.exe"
-npm.cmd run dev
-```
-
-## 使用流程
-
-1. 打开 `/meetings/new`。
-2. 点击“打开/聚焦三家网页”。
-3. 在受控浏览器里登录, 并确认每家的最高模型档位。
-4. 上传资料。
-5. 输入会议标题和会议目标。
-6. 可选: 填写已有议程提示, 作为主持人拟定议程的参考。
-7. 选择接力模式或并行模式, 设置每个议程讨论轮数。
-8. 选择主持人和参会模型。
-9. 勾选每个模型的最高模型确认。
-10. 点击“生成议程草案”。
-11. 在人工确认页编辑、增删、排序议程。
-12. 点击“确认议程并开始会议”。
-
-## 输出位置
-
-会议完成后, 结果会保存到:
+全部在项目目录下的 `.local-data/`（隐藏文件夹，macOS 访达按 `Cmd+Shift+.` 显示）：
 
 ```text
-.local-data/meetings/<meeting-id>/summary.md
-.local-data/meetings/<meeting-id>/meeting.json
+.local-data/browser-profile/                    # 受控浏览器登录态
+.local-data/db/meetingroom.db                   # 会议数据库
+.local-data/meetings/<id>/uploads/              # 上传的原文件
+.local-data/meetings/<id>/summary.md            # 会议纪要（Markdown）
+.local-data/meetings/<id>/meeting.json          # 完整记录（JSON）
 ```
 
-页面中也可以直接导出 Markdown。
-
-## 下一步路线
-
-- 为 Claude、豆包、智谱、通义千问增加网页端适配器。
-- 增加议程中途人工介入: 暂停、追加追问、跳过某位模型。
-- 增强主持人控场: 自动追问、总结共识、标注分歧点、生成行动清单。
-- 增加扫描版 PDF 的 OCR 兜底。
+页面上也可直接"导出 Markdown"。删除 `.local-data/` 即清空一切（含登录态）。
 
 ## 重要说明
 
-- 登录、验证码、二次验证、模型下拉选择必须由用户手动完成。
-- 程序会打开/聚焦网页, 但不会代替用户登录账号。
-- 网页端 DOM 会变化。如果某家网站改版, 可能需要更新对应适配器选择器。
+- 登录、验证码、模型下拉选择必须由用户手动完成，程序不代替登录。
+- 受控浏览器**默认后台静默运行**，开会不抢焦点；想实时盯操作用 `MEETINGROOM_FOREGROUND=1`。
+- 网页端 DOM 会变化：某家网站改版后该模型可能自检失败被跳过，更新对应选择器即可，不影响其他模型。
+- 拉取新代码后务必重新构建前端（一键启动脚本每次自动做；手动跑记得 `npm run build`）。
