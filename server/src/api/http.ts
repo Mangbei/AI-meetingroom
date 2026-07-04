@@ -92,11 +92,7 @@ function pickModelPostures(value: unknown, participants: MeetingModelName[]): Mo
 function defaultRuntimeStatus(model: MeetingModelName, loggedIn: boolean, warning?: string): RuntimeStatus {
   return {
     loggedIn,
-    requestedModel: model === 'chatgpt'
-      ? 'Highest thinking model'
-      : model === 'gemini'
-        ? 'Gemini Pro'
-        : 'DeepSeek R1 / 深度思考',
+    requestedModel: ADAPTER_REGISTRY[model].targetModel,
     configured: model === 'deepseek' && loggedIn,
     needsManualConfirmation: model !== 'deepseek',
     warning,

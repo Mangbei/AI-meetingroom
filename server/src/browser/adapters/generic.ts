@@ -79,6 +79,19 @@ export class GenericWebChatAdapter implements SiteAdapter {
     return null
   }
 
+  private async inputRequiresLogin(input: Locator): Promise<boolean> {
+    return input.evaluate(el => {
+      const text = [
+        el.getAttribute('placeholder'),
+        el.getAttribute('data-placeholder'),
+        el.getAttribute('aria-label'),
+        (el as HTMLElement).innerText,
+        (el as HTMLInputElement | HTMLTextAreaElement).value,
+      ].filter(Boolean).join(' ')
+      return /请登录|登录后|log\s*in|sign\s*in/i.test(text)
+    }).catch(() => false)
+  }
+
   /** Make sure a chat input is on screen, trying fallback URLs if the primary
    *  page doesn't show one (e.g. the site moved its chat path). */
   private async ensureInputPresent(): Promise<Locator | null> {
@@ -148,8 +161,21 @@ export class GenericWebChatAdapter implements SiteAdapter {
   async sendMessage(text: string): Promise<void> {
     const input = await this.findInput()
     if (!input) throw new Error(`${this.name}: 找不到输入框（当前页面 ${this.page.url()}）`)
+    if (await this.inputRequiresLogin(input)) {
+      throw new Error(`${this.name}: 输入框要求先登录（当前页面 ${this.page.url()}）`)
+    }
+    // Sites like Claude can leave menu/popover portals open after status checks
+    // or manual interaction. Close them before clicking the editor; otherwise a
+    // transparent overlay can intercept the click even though the input is visible.
+    await this.page.keyboard.press('Escape').catch(() => {})
+    await waitFor(100)
     if (this.spec.inputMode === 'type') {
-      await input.click()
+      try {
+        await input.click({ timeout: 5_000 })
+      } catch {
+        await this.page.keyboard.press('Escape').catch(() => {})
+        await input.click({ force: true, timeout: 5_000 })
+      }
       await this.page.keyboard.insertText(text)
     } else {
       // fill() works on both textarea and contenteditable; fall back to typing
@@ -157,7 +183,12 @@ export class GenericWebChatAdapter implements SiteAdapter {
       try {
         await input.fill(text)
       } catch {
-        await input.click()
+        try {
+          await input.click({ timeout: 5_000 })
+        } catch {
+          await this.page.keyboard.press('Escape').catch(() => {})
+          await input.click({ force: true, timeout: 5_000 })
+        }
         await this.page.keyboard.insertText(text)
       }
     }
@@ -212,7 +243,15 @@ export class GenericWebChatAdapter implements SiteAdapter {
     // newConversation already tried hard (incl. fallback URLs); a short
     // confirmation pass is enough here.
     const input = await this.findInput(4_000)
-    if (input) return { ok: true, missing: [] }
+    if (input) {
+      if (await this.inputRequiresLogin(input)) {
+        return {
+          ok: false,
+          missing: [`login（当前页面 ${this.page.url()} 的输入框要求先登录）`],
+        }
+      }
+      return { ok: true, missing: [] }
+    }
 
     // Enrich the failure so the user can tell "not logged in / wrong page"
     // apart from "site redesigned, selectors stale".

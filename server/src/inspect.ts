@@ -56,41 +56,44 @@ interface ElementInfo {
   snippet: string
 }
 
-// Serialized into the page context — must be self-contained.
-function collectInFrame(): { inputs: ElementInfo[]; sendish: ElementInfo[]; fileInputs: number; loginish: string[] } {
-  const trim = (s: string | null | undefined, n = 120) => (s ?? '').replace(/\s+/g, ' ').slice(0, n)
-  const info = (el: Element): ElementInfo => {
-    const h = el as HTMLElement
-    const rect = h.getBoundingClientRect?.()
-    return {
-      tag: el.tagName.toLowerCase(),
-      id: trim(el.id, 60),
-      cls: trim(el.getAttribute('class'), 140),
-      testid: trim(el.getAttribute('data-testid'), 80),
-      role: trim(el.getAttribute('role'), 30),
-      placeholder: trim(el.getAttribute('placeholder') ?? el.getAttribute('data-placeholder'), 60),
-      ariaLabel: trim(el.getAttribute('aria-label'), 60),
-      visible: !!rect && rect.width > 0 && rect.height > 0,
-      snippet: trim(h.outerHTML, 200),
+// Serialized into the page context — keep this as plain JavaScript. Some TSX
+// runtimes preserve type annotations in function.toString(), which makes
+// Playwright evaluate fail inside the page.
+const collectInFrame = Function(`
+  return () => {
+    const trim = (s, n = 120) => String(s ?? '').replace(/\\s+/g, ' ').slice(0, n)
+    const info = (el) => {
+      const rect = el.getBoundingClientRect?.()
+      return {
+        tag: el.tagName.toLowerCase(),
+        id: trim(el.id, 60),
+        cls: trim(el.getAttribute('class'), 140),
+        testid: trim(el.getAttribute('data-testid'), 80),
+        role: trim(el.getAttribute('role'), 30),
+        placeholder: trim(el.getAttribute('placeholder') ?? el.getAttribute('data-placeholder'), 60),
+        ariaLabel: trim(el.getAttribute('aria-label'), 60),
+        visible: !!rect && rect.width > 0 && rect.height > 0,
+        snippet: trim(el.outerHTML, 200),
+      }
     }
+    const inputs = [
+      ...document.querySelectorAll('textarea, div[contenteditable="true"], [contenteditable="true"], [role="textbox"], input[type="text"]'),
+    ].map(info)
+    const sendish = [...document.querySelectorAll('button, [role="button"], [class*="enter"], img[class*="enter"], [class*="send"]')]
+      .filter(el => {
+        const s = \`\${el.getAttribute('class') ?? ''} \${el.getAttribute('aria-label') ?? ''} \${el.getAttribute('data-testid') ?? ''} \${(el.textContent ?? '').slice(0, 20)}\`
+        return /send|发送|submit|arrow|enter|停止|stop|新对话/i.test(s)
+      })
+      .slice(0, 16)
+      .map(info)
+    const fileInputs = document.querySelectorAll('input[type="file"]').length
+    const loginish = [...document.querySelectorAll('button, a')]
+      .filter(el => /登录|登 录|log ?in|sign ?in/i.test((el.textContent ?? '').slice(0, 30)))
+      .slice(0, 5)
+      .map(el => trim(el.textContent, 30))
+    return { inputs, sendish, fileInputs, loginish }
   }
-  const inputs = [
-    ...document.querySelectorAll('textarea, div[contenteditable="true"], [contenteditable="true"], [role="textbox"], input[type="text"]'),
-  ].map(info)
-  const sendish = [...document.querySelectorAll('button, [role="button"]')]
-    .filter(el => {
-      const s = `${el.getAttribute('class') ?? ''} ${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('data-testid') ?? ''} ${(el.textContent ?? '').slice(0, 20)}`
-      return /send|发送|submit|arrow|enter|停止|stop/i.test(s)
-    })
-    .slice(0, 12)
-    .map(info)
-  const fileInputs = document.querySelectorAll('input[type="file"]').length
-  const loginish = [...document.querySelectorAll('button, a')]
-    .filter(el => /登录|登 录|log ?in|sign ?in/i.test((el.textContent ?? '').slice(0, 30)))
-    .slice(0, 5)
-    .map(el => trim(el.textContent, 30))
-  return { inputs, sendish, fileInputs, loginish }
-}
+`)() as () => { inputs: ElementInfo[]; sendish: ElementInfo[]; fileInputs: number; loginish: string[] }
 
 function printElements(label: string, items: ElementInfo[]): void {
   if (!items.length) { console.log(`  ${label}: （无）`); return }
@@ -124,8 +127,9 @@ for (const target of targets) {
       let data
       try {
         data = await frame.evaluate(collectInFrame)
-      } catch {
-        console.log(`[${tag}] 无法读取（跨域 iframe）`)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.log(`[${tag}] 无法读取: ${message}`)
         continue
       }
       console.log(`[${tag}]`)
@@ -139,5 +143,7 @@ for (const target of targets) {
   }
 }
 
-await cdp.disconnect()
 console.log('\n[inspect] 完成。把上面输出贴给开发者/AI 即可精准修正 specs.ts 中的选择器。')
+// Do not call cdp.disconnect() here: when attached to the app's controlled
+// browser it closes that Chrome instance and breaks the running service.
+process.exit(0)

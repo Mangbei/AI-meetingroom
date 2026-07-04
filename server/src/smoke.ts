@@ -24,7 +24,7 @@ const adapter = ADAPTER_REGISTRY[target].ctor()
 
 console.log(`[smoke] Target: ${target}`)
 
-let cdpPort = 9222
+let cdpPort = Number(process.env.BROWSER_CDP_PORT ?? 9222)
 const cdp = new CDPSession()
 
 if (shouldLaunch) {
@@ -33,11 +33,13 @@ if (shouldLaunch) {
   cdpPort = result.port
 } else {
   // try to detect the running port
-  for (const port of [9222, 9223, 9224]) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`)
-      if (res.ok) { cdpPort = port; break }
-    } catch { /* continue */ }
+  if (!process.env.BROWSER_CDP_PORT) {
+    for (const port of [9222, 9223, 9224]) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/json/version`)
+        if (res.ok) { cdpPort = port; break }
+      } catch { /* continue */ }
+    }
   }
   console.log(`[smoke] Connecting to existing browser on port ${cdpPort}`)
 }
@@ -52,7 +54,7 @@ await adapter.ensureReady()
 const loggedIn = await cdp.checkLoginStatus(target)
 if (!loggedIn) {
   console.error(`[smoke] ❌ Not logged in to ${target}. Please log in and retry.`)
-  await cdp.disconnect()
+  if (shouldLaunch) await cdp.disconnect()
   process.exit(1)
 }
 
@@ -73,5 +75,5 @@ if (full.length > 0) {
   console.error(`[smoke] ❌ Empty response — check selectors in adapters/${target}.ts`)
 }
 
-await cdp.disconnect()
+if (shouldLaunch) await cdp.disconnect()
 process.exit(full.length > 0 ? 0 : 1)

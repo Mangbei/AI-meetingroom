@@ -24,7 +24,13 @@ export const CLAUDE_SPEC: SiteSpec = {
   stopButton: 'button[aria-label*="Stop"]',
   newChatButton: 'a[href="/new"], a[aria-label*="New chat"], button[aria-label*="New chat"]',
   fileInput: 'input[type="file"]',
-  responseContainers: ['div.font-claude-message', '[data-testid*="message"]', '.prose'],
+  responseContainers: [
+    '[data-is-streaming] .font-claude-response',
+    '.font-claude-response',
+    '.font-claude-response-body',
+    'div.font-claude-message',
+    '.standard-markdown',
+  ],
 }
 
 export const DOUBAO_SPEC: SiteSpec = {
@@ -32,11 +38,19 @@ export const DOUBAO_SPEC: SiteSpec = {
   homeUrl: 'https://www.doubao.com/chat/',
   urlPrefixes: ['https://www.doubao.com'],
   inputBox: 'textarea[data-testid*="chat_input"], div[contenteditable="true"][data-testid*="input"], textarea, div[contenteditable="true"]',
-  sendButton: 'button[data-testid*="send"], button[aria-label*="发送"], #flow-end-msg-send',
+  sendButton: 'button[class*="send-msg-btn"], button[data-testid*="send"], button[aria-label*="发送"], #flow-end-msg-send',
   stopButton: STOP_BUTTON_COMMON,
   newChatButton: '[data-testid*="create_conversation"], button:has-text("新对话"), button:has-text("新建对话")',
   fileInput: 'input[type="file"]',
-  responseContainers: ['[data-testid*="message_text_content"]', '[data-testid*="receive_message"]', '[class*="message-content"]', '[class*="markdown"]'],
+  responseContainers: [
+    '[data-message-id] [data-streaming]',
+    '[data-container-type="block-v2"] [data-streaming]',
+    '[data-copy-telemetry="right_click_copy"] [data-message-id]',
+    '[data-testid*="message_text_content"]',
+    '[data-testid*="receive_message"]',
+    '[class*="message-content"]',
+    '[class*="markdown"]',
+  ],
 }
 
 export const ZHIPU_SPEC: SiteSpec = {
@@ -46,8 +60,9 @@ export const ZHIPU_SPEC: SiteSpec = {
   fallbackUrls: ['https://chatglm.cn/main/guest', 'https://chatglm.cn/'],
   urlPrefixes: ['https://chatglm.cn'],
   inputBox: 'textarea, div[contenteditable="true"]',
-  // 清言 send control is an icon button; fall back to Enter when not matched.
-  sendButton: 'button[class*="send"], [class*="enter"][role="button"], img[src*="send"]',
+  // 清言当前发送控件是无 role 的 .enter 容器，图标是 data: URL，
+  // 不能依赖 role=button 或 src*=send；点击外层容器最稳定。
+  sendButton: '.enter:not(:has(.empty)), .enter-icon-container:not(.empty), button[class*="send"], [class*="enter"][role="button"], img.enter_icon',
   stopButton: STOP_BUTTON_COMMON,
   newChatButton: 'button:has-text("新建对话"), [class*="new-chat"], [class*="newChat"]',
   fileInput: 'input[type="file"]',
@@ -77,7 +92,15 @@ export const YUANBAO_SPEC: SiteSpec = {
   stopButton: STOP_BUTTON_COMMON,
   newChatButton: '[class*="new-chat"], button:has-text("新建对话"), [class*="create"]',
   fileInput: 'input[type="file"]',
-  responseContainers: ['[class*="agent-chat__bubble--ai"]', '[class*="hyc-content"]', '[class*="agent-chat__bubble"]', '[class*="markdown"]'],
+  responseContainers: [
+    '[class*="agent-chat__bubble--ai"] [class*="hyc-content-md"]',
+    '[class*="agent-chat__bubble--ai"] [class*="hyc-common-markdown"]',
+    '[class*="agent-chat__bubble--ai"] .ybc-p',
+    '[class*="agent-chat__bubble--ai"]',
+    '[class*="hyc-content"]',
+    '[class*="agent-chat__bubble"]',
+    '[class*="markdown"]',
+  ],
 }
 
 export const KIMI_SPEC: SiteSpec = {
