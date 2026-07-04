@@ -8,7 +8,8 @@
     "dev:web": "npm run dev -w web",
     "build": "npm run build -w web",
     "start": "npm run start -w server",
-    "smoke": "npm run smoke -w server"
+    "smoke": "npm run smoke -w server",
+    "pack": "git archive --format=zip -o ai-meetingroom.zip HEAD"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
